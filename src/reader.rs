@@ -178,7 +178,6 @@ impl Reader {
         let mut head = self.stack.pop();
 
         while let Some(token) = self.tokens.pop_front() {
-            println!("{}", token);
             if let Some(form) = head {
                 let exp = match token {
                     Token::Atom(s) => match form {
