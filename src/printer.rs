@@ -1,4 +1,4 @@
-use crate::types::{ZapExp, ZapErr};
+use crate::types::{ZapExp};
 
 fn escape_str(s: String) -> String {
     s.replace("\"", "\\\"")

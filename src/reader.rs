@@ -1,183 +1,219 @@
 use std::num::ParseFloatError;
 use std::str::Chars;
+use std::collections::VecDeque;
 
 use crate::types::{ZapExp, ZapErr};
 
 /* Tokenizer */
 
-// NOT MY CODE
+#[derive(PartialEq)]
+enum Token {
+    Atom(String),
+    Quote,
+    ListStart,
+    ListEnd,
+}
+
 pub struct Reader {
-    pub tokens: Vec<String>,
-    pub pos: usize,
+    tokens: VecDeque<Token>,
+    token_buf: String,
+    stack: Vec<(Vec<ZapExp>, Token)>,
 }
 
 impl Reader {
-    pub fn next(&mut self) -> Option<String> {
-        self.pos += 1;
-        self.tokens.get(self.pos - 1).and_then(|x| Some(x.to_string()))
-    }
-    pub fn peek(&self) -> Option<String> {
-        self.tokens.get(self.pos).and_then(|x| Some(x.to_string()))
-    }
-}
 
-// MY CODE
-fn tokenize_string(chars: &mut Chars) -> String {
-    let mut token = String::from('"');
-    let mut escaped = false;
+    pub fn new() -> Reader {
+        Reader{
+            tokens: VecDeque::new(),
+            token_buf: String::with_capacity(32),
+            stack: Vec::with_capacity(64),
+        }        
+    }
 
-    while let Some(ch) = chars.next() {
-        if escaped {
-            match ch {
-                'n' => token.push('\n'),
-                'r' => token.push('\r'),
-                '0' => token.push('\0'),
-                't' => token.push('\t'),
-                _ => token.push(ch),
-            }
-            escaped = false;
-        } else {
-            match ch {
-                '"' => {
-                    token.push('"');
-                    break;
+    fn tokenize_string(&mut self, chars: &mut Chars) {
+        let mut escaped = self.token_buf.ends_with('\\');
+
+        while let Some(ch) = chars.next() {
+            if escaped {
+                match ch {
+                    'n' => self.token_buf.push('\n'),
+                    'r' => self.token_buf.push('\r'),
+                    '0' => self.token_buf.push('\0'),
+                    't' => self.token_buf.push('\t'),
+                    _ => self.token_buf.push(ch),
                 }
-                '\\' => {
-                    escaped = true;
-                    continue;
-                }
-                _ => token.push(ch),
-            }
-        }
-    }
-    token
-}
-
-fn ignore_line(chars: &mut Chars) {
-    for ch in chars {
-        if ch == '\n' {
-            break
-        }
-    }
-}
-
-#[inline(always)]
-fn flush_token(mut token: String, tokens: &mut Vec<String>) -> String {
-    if token.len() > 0 {
-        tokens.push(token);
-        token = String::new();
-    }
-    return token
-}
-
-pub fn tokenize(src: String) -> Vec<String> {
-    let mut tokens = Vec::with_capacity(256);
-    let mut chars = src.chars();
-    let mut token = String::new();
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '(' | ')'  => {
-                token = flush_token(token, &mut tokens);
-                tokens.push(ch.to_string());
-            },
-            '\'' | '`' | '@' | '^' => {
-                if token.is_empty() {
-                    tokens.push(ch.to_string());
-                } else {
-                    token.push(ch);
-                }
-            },
-            '~' => {
-                if token.is_empty() {
-                    match chars.next() {
-                        Some('@') => tokens.push("~@".to_string()),
-                        Some(ch) => {
-                            tokens.push('~'.to_string());
-                            token.push(ch);
-                        }
-                        None => break,
+                escaped = false;
+            } else {
+                match ch {
+                    '"' => {
+                        self.flush_token();
+                        break;
                     }
-                } else {
-                    token.push(ch);
+                    '\\' => {
+                        escaped = true;
+                        continue;
+                    }
+                    _ => self.token_buf.push(ch),
                 }
-            },
-            ' ' | '\n' | '\t' | ',' => {
-                token = flush_token(token, &mut tokens);
-            },
-            ';' => {
-                ignore_line(&mut chars);
-                token = flush_token(token, &mut tokens);
-            },
-            '"' => token = tokenize_string(&mut chars),
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn flush_token(&mut self) {
+        if self.token_buf.len() > 0 {
+            self.token_buf.shrink_to_fit();
+            self.tokens.push_back(Token::Atom(self.token_buf.clone()));
+            self.token_buf.truncate(0);
+        }
+    }
+
+    pub fn tokenize(&mut self, src: &str) {
+        let mut chars = src.chars();
+
+        // If the last tokenize call ended while in a string, the token_buf will start if a ", so we
+        // want to continue reading that string
+        if self.token_buf.starts_with('"') {
+            self.tokenize_string(&mut chars);
+        }
+        // If the last tokenize call ended in a comment
+        else if self.token_buf.starts_with(";") {  
+            if chars.find(|&ch| ch == '\n').is_some() {
+                self.token_buf.truncate(0);
+            }
+        }
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                ' ' | '\n' | '\t' | ',' => {
+                    self.flush_token();
+                },
+                '(' => {
+                    self.flush_token();
+                    self.tokens.push_back(Token::ListStart);
+                },
+                ')' => {
+                    self.flush_token();
+                    self.tokens.push_back(Token::ListEnd);
+                },
+                '\'' => {
+                    self.flush_token();
+                    self.tokens.push_back(Token::Quote);
+                },
+                '`' | '@' | '^' => {
+                    if self.token_buf.is_empty() {
+                        self.tokens.push_back(Token::Atom(ch.to_string()));
+                    } else {
+                        self.token_buf.push(ch);
+                    }
+                },
+                '~' => {
+                    if self.token_buf.is_empty() {
+                        match chars.next() {
+                            Some('@') => self.tokens.push_back(Token::Atom("~@".to_string())),
+                            Some(ch) => {
+                                self.tokens.push_back(Token::Atom('~'.to_string()));
+                                self.token_buf.push(ch);
+                            }
+                            None => break,
+                        }
+                    } else {
+                        self.token_buf.push(ch);
+                    }
+                },
+                ';' => {
+                    self.flush_token();
+                    self.token_buf.push(';');
+                    if chars.find(|&ch| ch == '\n').is_some() {
+                        self.token_buf.truncate(0);
+                    }
+                },
+                '"' => {
+                    self.flush_token();
+                    self.token_buf.push('"');
+                    self.tokenize_string(&mut chars);
+                }
+                _ => {
+                    self.token_buf.push(ch);
+                }
+            }
+        }
+    }
+
+    fn read_atom(mut atom: String) -> ZapExp {
+        match atom.as_ref() {
+            "nil" => ZapExp::Nil,
+            "true" => ZapExp::Bool(true),
+            "false" => ZapExp::Bool(false),
             _ => {
-                token.push(ch);
+                if atom.starts_with('"') {
+                    return ZapExp::Str(atom.split_off(1))
+                }
+
+                let potential_float: Result<f64, ParseFloatError> = atom.parse();
+                match potential_float {
+                    Ok(v) => ZapExp::Number(v),
+                    Err(_) => ZapExp::Symbol(atom),
+                }
             }
         }
     }
 
-    flush_token(token, &mut tokens);
+    pub fn read_form(&mut self) -> Result<Option<ZapExp>, ZapErr> {
 
-    tokens
-}
+        let mut head = self.stack.pop();
 
-/* Parser */
-
-fn read_atom(token: &str) -> ZapExp {
-
-    match token.as_ref() {
-        "nil" => ZapExp::Nil,
-        "true" => ZapExp::Bool(true),
-        "false" => ZapExp::Bool(false),
-        _ => {
-            if token.starts_with('"') && token.ends_with('"') {
-                return ZapExp::Str(
-                    token
-                        .trim_start_matches('"')
-                        .trim_end_matches('"')
-                        .to_string(),
-                );
-            }
-            let potential_float: Result<f64, ParseFloatError> = token.parse();
-            match potential_float {
-                Ok(v) => ZapExp::Number(v),
-                Err(_) => ZapExp::Symbol(token.to_string()),
+        while let Some(token) = self.tokens.pop_front() {
+            if let Some((mut seq, end)) = head {
+                match token {
+                    Token::Atom(s) => {
+                        seq.push(Reader::read_atom(s));
+                        head = Some((seq, end));
+                    },
+                    Token::Quote => {
+                        // Fuck ca va prendre de la recursion...
+                        head = Some((seq, end));
+                    },
+                    Token::ListStart => {
+                        self.stack.push((seq, end));
+                        head = Some((Vec::new(), Token::ListEnd));
+                    },
+                    Token::ListEnd => {
+                        if end != token {
+                            return Err(ZapErr::Msg("Was not expecting a ')'".to_string()))
+                        }
+                        // There is a parent
+                        if let Some((mut parent, end)) = self.stack.pop() {
+                            parent.push(ZapExp::List(seq));
+                            head = Some((parent, end));
+                        } else {
+                            return Ok(Some(ZapExp::List(seq)))
+                        }
+                    }
+                }
+            } else {
+                match token {
+                    Token::Atom(s) => {
+                        return Ok(Some(Reader::read_atom(s)))
+                    },
+                    Token::Quote => {
+                        // Fuck ca va prendre de la recursion...
+                    },
+                    Token::ListStart => {
+                        head = Some((Vec::new(), Token::ListEnd));
+                    },
+                    Token::ListEnd => {
+                        return Err(ZapErr::Msg("A form cannot begin with ')'".to_string()))
+                    }
+                }
             }
         }
-    }
-}
 
-fn read_seq(rdr: &mut Reader, end: &str) -> Result<ZapExp, ZapErr> {
-    let mut seq: Vec<ZapExp> = Vec::new();
-
-    loop {
-        if let Some(token) = rdr.peek() {
-            if token == end {
-                break;
-            }
-            seq.push(read_form(rdr)?);
-        } else {
-            return Err(ZapErr::Msg("Unexpected EOF in read_seq".to_string()))
+        if let Some(seq) = head {
+            self.stack.push(seq);
         }
+
+        Ok(None)
     }
-
-    rdr.next();
-
-    match end {
-        ")" => Ok(ZapExp::List(seq)),
-        _ => Err(ZapErr::Msg("Unexpected EOF in read_seq".to_string()))
-    }
-}
-
-pub fn read_form(rdr: &mut Reader) -> Result<ZapExp, ZapErr> {
-    if let Some(token) = rdr.next() {
-        return match token.as_ref() {
-            ")" => Err(ZapErr::Msg("Unexpected ')'".to_string())),
-            "(" => read_seq(rdr, ")"),
-            _ => Ok(read_atom(token.as_ref())),
-        }
-    }
-
-    return Err(ZapErr::Msg("Unexpected EOF in read_form".to_string()))
 }
 
