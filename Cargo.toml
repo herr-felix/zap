@@ -7,6 +7,10 @@ edition = "2021"
 name = "tcp_repl"
 path = "./src/tcp_repl.rs"
 
+[[bin]]
+name = "std_repl"
+path = "./src/std_repl.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
