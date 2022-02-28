@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::iter::Peekable;
 use std::num::ParseFloatError;
 use std::str::Chars;
 
@@ -10,8 +11,11 @@ use crate::types::{ZapErr, ZapExp};
 enum Token {
     Atom(String),
     Quote,
+    Unquote,
     ListStart,
     ListEnd,
+    SpliceUnquote,
+    Deref,
 }
 
 impl std::fmt::Display for Token {
@@ -19,21 +23,27 @@ impl std::fmt::Display for Token {
         match self {
             Token::Atom(s) => write!(f, "Atom({})", s),
             Token::Quote => write!(f, "{}", "Quote"),
+            Token::Unquote => write!(f, "{}", "Unquote"),
+            Token::SpliceUnquote => write!(f, "{}", "SpliceUnquote"),
+            Token::Deref => write!(f, "{}", "Deref"),
             Token::ListStart => write!(f, "{}", "ListStart"),
             Token::ListEnd => write!(f, "{}", "ListEnd"),
         }
     }
 }
 
-enum FormParent {
+enum ParentForm {
     List(Vec<ZapExp>),
     Quote,
+    Unquote,
+    SpliceUnquote,
+    Deref,
 }
 
 pub struct Reader {
     tokens: VecDeque<Token>,
     token_buf: String,
-    stack: Vec<FormParent>,
+    stack: Vec<ParentForm>,
 }
 
 impl Reader {
@@ -45,7 +55,7 @@ impl Reader {
         }
     }
 
-    fn tokenize_string(&mut self, chars: &mut Chars) {
+    fn tokenize_string(&mut self, chars: &mut Peekable<Chars>) {
         let mut escaped = self.token_buf.ends_with('\\');
 
         while let Some(ch) = chars.next() {
@@ -84,7 +94,7 @@ impl Reader {
     }
 
     pub fn tokenize(&mut self, src: &str) {
-        let mut chars = src.chars();
+        let mut chars = src.chars().peekable();
 
         // If the last tokenize call ended while in a string, the token_buf will start if a ", so we
         // want to continue reading that string
@@ -95,6 +105,18 @@ impl Reader {
         else if self.token_buf.starts_with(";") {
             if chars.find(|&ch| ch == '\n').is_some() {
                 self.token_buf.truncate(0);
+            }
+        } else if self.token_buf.starts_with('~') {
+            match chars.peek() {
+                Some('@') => {
+                    chars.next();
+                    self.tokens.push_back(Token::SpliceUnquote);
+                }
+                Some(_) => {
+                    self.tokens.push_back(Token::Unquote);
+                    self.token_buf.truncate(0);
+                }
+                None => {}
             }
         }
 
@@ -115,7 +137,10 @@ impl Reader {
                     self.flush_token();
                     self.tokens.push_back(Token::Quote);
                 }
-                '`' | '@' | '^' => {
+                '@' => {
+                    self.tokens.push_back(Token::Deref);
+                }
+                '`' | '^' => {
                     if self.token_buf.is_empty() {
                         self.tokens.push_back(Token::Atom(ch.to_string()));
                     } else {
@@ -124,13 +149,16 @@ impl Reader {
                 }
                 '~' => {
                     if self.token_buf.is_empty() {
-                        match chars.next() {
-                            Some('@') => self.tokens.push_back(Token::Atom("~@".to_string())),
-                            Some(ch) => {
-                                self.tokens.push_back(Token::Atom('~'.to_string()));
-                                self.token_buf.push(ch);
+                        match chars.peek() {
+                            Some('@') => {
+                                chars.next();
+                                self.tokens.push_back(Token::SpliceUnquote);
                             }
-                            None => break,
+                            Some(_) => self.tokens.push_back(Token::Unquote),
+                            None => {
+                                self.token_buf.push(ch);
+                                break;
+                            }
                         }
                     } else {
                         self.token_buf.push(ch);
@@ -174,6 +202,11 @@ impl Reader {
         }
     }
 
+    fn read_error(&mut self, msg: &str) -> ZapErr {
+        self.stack.truncate(0);
+        ZapErr::Msg(msg.to_string())
+    }
+
     pub fn read_form(&mut self) -> Result<Option<ZapExp>, ZapErr> {
         let mut head = self.stack.pop();
 
@@ -181,66 +214,105 @@ impl Reader {
             if let Some(form) = head {
                 let exp = match token {
                     Token::Atom(s) => match form {
-                        FormParent::List(mut seq) => {
+                        ParentForm::List(mut seq) => {
                             seq.push(Reader::read_atom(s));
-                            head = Some(FormParent::List(seq));
+                            head = Some(ParentForm::List(seq));
                             continue;
                         }
-                        FormParent::Quote => {
+                        ParentForm::Quote
+                        | ParentForm::SpliceUnquote
+                        | ParentForm::Unquote
+                        | ParentForm::Deref => {
                             self.stack.push(form);
                             Reader::read_atom(s)
-                        },
+                        }
                     },
                     Token::Quote => {
                         self.stack.push(form);
-                        head = Some(FormParent::Quote);
+                        head = Some(ParentForm::Quote);
+                        continue;
+                    }
+                    Token::SpliceUnquote => {
+                        self.stack.push(form);
+                        head = Some(ParentForm::SpliceUnquote);
+                        continue;
+                    }
+                    Token::Unquote => {
+                        self.stack.push(form);
+                        head = Some(ParentForm::Unquote);
+                        continue;
+                    }
+                    Token::Deref => {
+                        self.stack.push(form);
+                        head = Some(ParentForm::Deref);
                         continue;
                     }
                     Token::ListStart => {
                         self.stack.push(form);
-                        head = Some(FormParent::List(Vec::new()));
+                        head = Some(ParentForm::List(Vec::new()));
                         continue;
                     }
                     Token::ListEnd => match form {
-                        FormParent::List(seq) => ZapExp::List(seq),
-                        FormParent::Quote => {
-                            return Err(ZapErr::Msg("Cannot quote a ')'".to_string()))
+                        ParentForm::List(seq) => ZapExp::List(seq),
+                        ParentForm::Quote => return Err(self.read_error("Cannot quote a ')'")),
+                        ParentForm::Unquote => return Err(self.read_error("Cannot unquote a ')'")),
+                        ParentForm::SpliceUnquote => {
+                            return Err(self.read_error("Cannot splice-unquote a ')'"))
                         }
+                        ParentForm::Deref => return Err(self.read_error("Cannot deref a ')'")),
                     },
                 };
 
                 head = match self.stack.pop() {
-                    Some(FormParent::List(mut parent)) => {
+                    Some(ParentForm::List(mut parent)) => {
                         parent.push(exp);
-                        Some(FormParent::List(parent))
+                        Some(ParentForm::List(parent))
                     }
-                    Some(FormParent::Quote) => {
+                    Some(ParentForm::Quote) => {
                         self.tokens.push_front(Token::ListEnd);
-                        Some(FormParent::List(vec![
+                        Some(ParentForm::List(vec![
                             ZapExp::Symbol("quote".to_string()),
+                            exp,
+                        ]))
+                    }
+                    Some(ParentForm::Unquote) => {
+                        self.tokens.push_front(Token::ListEnd);
+                        Some(ParentForm::List(vec![
+                            ZapExp::Symbol("unquote".to_string()),
+                            exp,
+                        ]))
+                    }
+                    Some(ParentForm::SpliceUnquote) => {
+                        self.tokens.push_front(Token::ListEnd);
+                        Some(ParentForm::List(vec![
+                            ZapExp::Symbol("splice-unquote".to_string()),
+                            exp,
+                        ]))
+                    }
+                    Some(ParentForm::Deref) => {
+                        self.tokens.push_front(Token::ListEnd);
+                        Some(ParentForm::List(vec![
+                            ZapExp::Symbol("deref".to_string()),
                             exp,
                         ]))
                     }
                     None => return Ok(Some(exp)),
                 }
             } else {
-                match token {
+                head = match token {
                     Token::Atom(s) => return Ok(Some(Reader::read_atom(s))),
-                    Token::Quote => {
-                        head = Some(FormParent::Quote);
-                    }
-                    Token::ListStart => {
-                        head = Some(FormParent::List(Vec::new()));
-                    }
-                    Token::ListEnd => {
-                        return Err(ZapErr::Msg("A form cannot begin with ')'".to_string()))
-                    }
+                    Token::Quote => Some(ParentForm::Quote),
+                    Token::Unquote => Some(ParentForm::Unquote),
+                    Token::SpliceUnquote => Some(ParentForm::SpliceUnquote),
+                    Token::Deref => Some(ParentForm::Deref),
+                    Token::ListStart => Some(ParentForm::List(Vec::new())),
+                    Token::ListEnd => return Err(self.read_error("A form cannot begin with ')'")),
                 }
             }
         }
 
-        if let Some(seq) = head {
-            self.stack.push(seq);
+        if let Some(parent) = head {
+            self.stack.push(parent);
         }
 
         Ok(None)
