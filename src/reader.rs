@@ -33,7 +33,7 @@ impl std::fmt::Display for Token {
 }
 
 enum ParentForm {
-    List(Vec<ZapExp>),
+    List(VecDeque<ZapExp>),
     Quote,
     Unquote,
     SpliceUnquote,
@@ -207,6 +207,14 @@ impl Reader {
         ZapErr::Msg(msg.to_string())
     }
 
+    #[inline(always)]
+    fn expand_reader_macro(&mut self, expanded: &str, exp: ZapExp) -> Option<ParentForm> {
+        self.tokens.push_front(Token::ListEnd);
+        Some(ParentForm::List(
+            [ZapExp::Symbol(expanded.to_string()), exp].into(),
+        ))
+    }
+
     pub fn read_form(&mut self) -> Result<Option<ZapExp>, ZapErr> {
         let mut head = self.stack.pop();
 
@@ -215,7 +223,7 @@ impl Reader {
                 let exp = match token {
                     Token::Atom(s) => match form {
                         ParentForm::List(mut seq) => {
-                            seq.push(Reader::read_atom(s));
+                            seq.push_back(Reader::read_atom(s));
                             head = Some(ParentForm::List(seq));
                             continue;
                         }
@@ -249,7 +257,7 @@ impl Reader {
                     }
                     Token::ListStart => {
                         self.stack.push(form);
-                        head = Some(ParentForm::List(Vec::new()));
+                        head = Some(ParentForm::List(VecDeque::new()));
                         continue;
                     }
                     Token::ListEnd => match form {
@@ -265,37 +273,15 @@ impl Reader {
 
                 head = match self.stack.pop() {
                     Some(ParentForm::List(mut parent)) => {
-                        parent.push(exp);
+                        parent.push_back(exp);
                         Some(ParentForm::List(parent))
                     }
-                    Some(ParentForm::Quote) => {
-                        self.tokens.push_front(Token::ListEnd);
-                        Some(ParentForm::List(vec![
-                            ZapExp::Symbol("quote".to_string()),
-                            exp,
-                        ]))
-                    }
-                    Some(ParentForm::Unquote) => {
-                        self.tokens.push_front(Token::ListEnd);
-                        Some(ParentForm::List(vec![
-                            ZapExp::Symbol("unquote".to_string()),
-                            exp,
-                        ]))
-                    }
+                    Some(ParentForm::Quote) => self.expand_reader_macro("quote", exp),
+                    Some(ParentForm::Unquote) => self.expand_reader_macro("unquote", exp),
                     Some(ParentForm::SpliceUnquote) => {
-                        self.tokens.push_front(Token::ListEnd);
-                        Some(ParentForm::List(vec![
-                            ZapExp::Symbol("splice-unquote".to_string()),
-                            exp,
-                        ]))
+                        self.expand_reader_macro("splice-unquote", exp)
                     }
-                    Some(ParentForm::Deref) => {
-                        self.tokens.push_front(Token::ListEnd);
-                        Some(ParentForm::List(vec![
-                            ZapExp::Symbol("deref".to_string()),
-                            exp,
-                        ]))
-                    }
+                    Some(ParentForm::Deref) => self.expand_reader_macro("deref", exp),
                     None => return Ok(Some(exp)),
                 }
             } else {
@@ -305,7 +291,7 @@ impl Reader {
                     Token::Unquote => Some(ParentForm::Unquote),
                     Token::SpliceUnquote => Some(ParentForm::SpliceUnquote),
                     Token::Deref => Some(ParentForm::Deref),
-                    Token::ListStart => Some(ParentForm::List(Vec::new())),
+                    Token::ListStart => Some(ParentForm::List(VecDeque::new())),
                     Token::ListEnd => return Err(self.read_error("A form cannot begin with ')'")),
                 }
             }

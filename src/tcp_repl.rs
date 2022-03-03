@@ -1,3 +1,5 @@
+mod env;
+mod eval;
 mod printer;
 mod reader;
 mod repl;

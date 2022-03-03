@@ -1,7 +1,9 @@
 use std::io;
 
+use crate::env::Env;
+use crate::eval::eval;
 use crate::reader::Reader;
-use crate::types::ZapErr;
+use crate::types::{ZapErr, ZapExp};
 
 pub fn start_repl<I, O>(input: &mut I, output: &mut O) -> io::Result<()>
 where
@@ -15,6 +17,13 @@ where
         output.write("> ".as_bytes())?;
         output.flush()?;
 
+        let mut env = Env::new();
+        env.set(
+            ZapExp::Symbol("f".to_string()),
+            ZapExp::Str("Felix".to_string()),
+        )
+        .unwrap();
+
         loop {
             let n = input.read(&mut buf[..])?;
 
@@ -23,12 +32,17 @@ where
 
             loop {
                 match reader.read_form() {
-                    Ok(Some(form)) => {
-                        output.write_fmt(format_args!("{}\n", form.pr_str()))?;
-                    }
+                    Ok(Some(form)) => match eval(form, &mut env) {
+                        Ok(result) => {
+                            output.write_fmt(format_args!("{}\n", result.pr_str()))?;
+                        }
+                        Err(ZapErr::Msg(err)) => {
+                            output.write_fmt(format_args!("Eval error: {}\n", err))?;
+                        }
+                    },
                     Ok(None) => break,
                     Err(ZapErr::Msg(err)) => {
-                        output.write_fmt(format_args!("Error: {}\n", err))?;
+                        output.write_fmt(format_args!("Reader error: {}\n", err))?;
                     }
                 }
             }

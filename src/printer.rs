@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::types::ZapExp;
 
 fn escape_str(s: String) -> String {
@@ -21,7 +23,7 @@ impl ZapExp {
     }
 }
 
-fn pr_seq(seq: &Vec<ZapExp>, start: &str, end: &str) -> String {
+fn pr_seq(seq: &VecDeque<ZapExp>, start: &str, end: &str) -> String {
     let strs: Vec<String> = seq.iter().map(|x| x.pr_str()).collect();
     format!("{}{}{}", start, strs.join(" "), end)
 }

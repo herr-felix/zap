@@ -1,0 +1,12 @@
+# Head dump:
+- HQ: Head quarter, is the main loop in the Zap runtime. 
+It's looping on an MPSC channel, updating the root environement, recording user change, forking environement, etc.
+
+- Extension loading: simple interface for loading an external dynamic library
+with a `init` method giving access to the main tokio runtime and an EnvRequester.
+
+- History: When the root environement is mutated (usually when "define" is called),
+the mutation's timestamp, symbol associated value can be appened to a mutation log,
+allowing the runtime to restart where it was, or to reset the environement to
+a certain mutation.
+
