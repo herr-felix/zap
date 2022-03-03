@@ -1,16 +1,19 @@
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::types::{error, ZapErr, ZapExp};
 
 pub struct Env {
-    root: HashMap<String, ZapExp>,
+//    root: HashMap<String, ZapExp>,
+    root: BTreeMap<String, ZapExp>,
 }
 
 impl Env {
     pub fn new() -> Env {
         Env {
-            root: HashMap::<String, ZapExp>::new(),
+//            root: HashMap::<String, ZapExp>::new(),
+            root: BTreeMap::<String, ZapExp>::new(),
         }
     }
 

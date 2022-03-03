@@ -5,11 +5,15 @@ use crate::env::Env;
 
 
 fn plus(args: &[ZapExp]) -> ZapResult {
-    match args.iter().cloned().reduce(|acc, x| { acc + x }) {
-        Some(Number(x)) => Ok(Number(x)),
-        None => Ok(Number(0.0)),
-        _ => Err(error("+ can only add numbers.")),
+    let mut sum = 0.0;
+    for v in args {
+        if let ZapExp::Number(x) = v {
+            sum = sum+x;
+        } else {
+            return Err(error("+ can only add numbers."))
+        }
     }
+    Ok(Number(sum))
 }
 
 

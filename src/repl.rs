@@ -1,4 +1,5 @@
 use std::io;
+use std::time::Instant;
 
 use crate::env::Env;
 use crate::eval::eval;
@@ -35,12 +36,17 @@ where
 
             loop {
                 match reader.read_form() {
-                    Ok(Some(form)) => match eval(form, &mut env) {
-                        Ok(result) => {
-                            output.write_fmt(format_args!("{}\n", result.pr_str()))?;
-                        }
-                        Err(ZapErr::Msg(err)) => {
-                            output.write_fmt(format_args!("Eval error: {}\n", err))?;
+                    Ok(Some(form)) => {
+                        let start = Instant::now();
+                        match eval(form, &mut env)  {
+                            Ok(result) => {
+                                let end = Instant::now();
+                                output.write_fmt(format_args!("Evaluated in {:?}\n", end - start))?;
+                                output.write_fmt(format_args!("{}\n", result.pr_str()))?;
+                            }
+                            Err(ZapErr::Msg(err)) => {
+                                output.write_fmt(format_args!("Eval error: {}\n", err))?;
+                            }
                         }
                     },
                     Ok(None) => break,
