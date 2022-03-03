@@ -1,22 +1,26 @@
 use crate::env::Env;
-use crate::types::{error, ZapErr, ZapExp};
+use crate::types::{error, ZapErr, ZapExp, ZapResult};
 use std::collections::VecDeque;
 
 enum Form {
     List(VecDeque<ZapExp>, VecDeque<ZapExp>),
 }
 
-pub fn eval(root: ZapExp, env: &mut Env) -> Result<ZapExp, ZapErr> {
+
+fn apply_list(list: &[ZapExp]) -> ZapResult {
+    if let Some((first, args)) = list.split_first() {
+        return match first {
+            ZapExp::Func(_, func) => func(args),
+            _ => Err(error("Only functions call be called.")),
+        }
+    }
+    Err(error("Cannot evaluate a empty list."))
+}
+
+
+pub fn eval(root: ZapExp, env: &mut Env) -> ZapResult {
     let mut stack = Vec::with_capacity(32);
     let mut exp = root;
-
-    // eval (+ 1 2)
-    // push List
-    // eval + -> env.get("+")
-    // eval 1 -> 1
-    // eval 2 -> 2
-    // Pop ->
-    //
 
     loop {
         exp = match exp {
@@ -49,10 +53,7 @@ pub fn eval(root: ZapExp, env: &mut Env) -> Result<ZapExp, ZapErr> {
                             exp = val;
                             break;
                         } else {
-                            // We made it to the end of the list.
-                            // We shall make the function call here.
-                            // But for now, we simply return the list as is.
-                            ZapExp::List(dst)
+                            apply_list(dst.make_contiguous())?
                         }
                     }
                 }

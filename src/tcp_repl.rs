@@ -4,6 +4,7 @@ mod printer;
 mod reader;
 mod repl;
 mod types;
+mod core;
 
 use std::net::{TcpListener, TcpStream};
 use std::thread;

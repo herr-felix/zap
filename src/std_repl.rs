@@ -5,6 +5,8 @@ mod reader;
 mod repl;
 mod types;
 
+mod core;
+
 use std::io;
 
 use crate::repl::start_repl;

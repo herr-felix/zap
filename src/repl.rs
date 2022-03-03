@@ -4,6 +4,7 @@ use crate::env::Env;
 use crate::eval::eval;
 use crate::reader::Reader;
 use crate::types::{ZapErr, ZapExp};
+use crate::core::load;
 
 pub fn start_repl<I, O>(input: &mut I, output: &mut O) -> io::Result<()>
 where
@@ -23,6 +24,8 @@ where
             ZapExp::Str("Felix".to_string()),
         )
         .unwrap();
+
+        load(&mut env);
 
         loop {
             let n = input.read(&mut buf[..])?;
