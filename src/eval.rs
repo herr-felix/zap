@@ -37,7 +37,7 @@ pub fn eval(root: ZapExp, env: &mut Env) -> ZapResult {
                 if let Some(val) = env.get(&s) {
                     val
                 } else {
-                    return Err(error(format!("Symbol '{}' not in scope.", s).as_str()));
+                    return Err(error(format!("symbol '{}' not in scope.", s).as_str()));
                 }
             }
             exp => exp,
