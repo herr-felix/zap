@@ -1,13 +1,12 @@
 use crate::env::Env;
 use crate::types::{error, ZapExp, ZapResult};
-use std::collections::VecDeque;
 
 enum Form {
-    List(VecDeque<ZapExp>, VecDeque<ZapExp>),
+    List(Vec<ZapExp>, std::vec::IntoIter<ZapExp>),
 }
 
 
-fn apply_list(list: &[ZapExp]) -> ZapResult {
+fn apply_list(list: Vec<ZapExp>) -> ZapResult {
     if let Some((first, args)) = list.split_first() {
         return match first {
             ZapExp::Func(_, func) => func(args),
@@ -24,13 +23,15 @@ pub fn eval(root: ZapExp, env: &mut Env) -> ZapResult {
 
     loop {
         exp = match exp {
-            ZapExp::List(mut l) => {
-                if let Some(val) = l.pop_front() {
-                    stack.push(Form::List(VecDeque::with_capacity(l.len() + 1), l));
+            ZapExp::List(l) => {
+                let len = l.len();
+                let mut src = l.into_iter();
+                if let Some(val) = src.next() {
+                    stack.push(Form::List(Vec::with_capacity(len), src));
                     exp = val;
                     continue;
                 } else {
-                    ZapExp::List(l)
+                    ZapExp::List(Vec::new())
                 }
             }
             ZapExp::Symbol(s) => {
@@ -47,13 +48,13 @@ pub fn eval(root: ZapExp, env: &mut Env) -> ZapResult {
             if let Some(parent) = stack.pop() {
                 exp = match parent {
                     Form::List(mut dst, mut src) => {
-                        dst.push_back(exp);
-                        if let Some(val) = src.pop_front() {
+                        dst.push(exp);
+                        if let Some(val) = src.next() {
                             stack.push(Form::List(dst, src));
                             exp = val;
                             break;
                         } else {
-                            apply_list(dst.make_contiguous())?
+                            apply_list(dst)?
                         }
                     }
                 }

@@ -33,7 +33,7 @@ impl std::fmt::Display for Token {
 }
 
 enum ParentForm {
-    List(VecDeque<ZapExp>),
+    List(Vec<ZapExp>),
     Quote,
     Unquote,
     SpliceUnquote,
@@ -223,7 +223,7 @@ impl Reader {
                 let exp = match token {
                     Token::Atom(s) => match form {
                         ParentForm::List(mut seq) => {
-                            seq.push_back(Reader::read_atom(s));
+                            seq.push(Reader::read_atom(s));
                             head = Some(ParentForm::List(seq));
                             continue;
                         }
@@ -257,7 +257,7 @@ impl Reader {
                     }
                     Token::ListStart => {
                         self.stack.push(form);
-                        head = Some(ParentForm::List(VecDeque::new()));
+                        head = Some(ParentForm::List(Vec::new()));
                         continue;
                     }
                     Token::ListEnd => match form {
@@ -273,7 +273,7 @@ impl Reader {
 
                 head = match self.stack.pop() {
                     Some(ParentForm::List(mut parent)) => {
-                        parent.push_back(exp);
+                        parent.push(exp);
                         Some(ParentForm::List(parent))
                     }
                     Some(ParentForm::Quote) => self.expand_reader_macro("quote", exp),
@@ -291,7 +291,7 @@ impl Reader {
                     Token::Unquote => Some(ParentForm::Unquote),
                     Token::SpliceUnquote => Some(ParentForm::SpliceUnquote),
                     Token::Deref => Some(ParentForm::Deref),
-                    Token::ListStart => Some(ParentForm::List(VecDeque::new())),
+                    Token::ListStart => Some(ParentForm::List(Vec::new())),
                     Token::ListEnd => return Err(self.read_error("A form cannot begin with ')'")),
                 }
             }

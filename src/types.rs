@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 
 #[derive(Clone)]
 pub enum ZapExp {
@@ -7,7 +6,7 @@ pub enum ZapExp {
     Symbol(String),
     Number(f64),
     Str(String),
-    List(VecDeque<ZapExp>),
+    List(Vec<ZapExp>),
     Func(String, fn(&[ZapExp]) -> Result<ZapExp, ZapErr>),
 }
 
