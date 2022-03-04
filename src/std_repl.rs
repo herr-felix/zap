@@ -17,3 +17,6 @@ fn main() {
 
     start_repl(&mut stdin, &mut stdout).unwrap();
 }
+
+#[cfg(test)]
+mod tests;

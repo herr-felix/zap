@@ -1,5 +1,5 @@
 use crate::env::Env;
-use crate::types::{error, ZapErr, ZapExp, ZapResult};
+use crate::types::{error, ZapExp, ZapResult};
 use std::collections::VecDeque;
 
 enum Form {

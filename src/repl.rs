@@ -1,5 +1,7 @@
-use std::io;
 use std::time::Instant;
+
+use tokio::net::TcpStream;
+use tokio::io::{self, AsyncWriteExt, AsyncReadExt};
 
 use crate::env::Env;
 use crate::eval::eval;
@@ -7,29 +9,36 @@ use crate::reader::Reader;
 use crate::types::{ZapErr, ZapExp};
 use crate::core::load;
 
-pub fn start_repl<I, O>(input: &mut I, output: &mut O) -> io::Result<()>
-where
-    I: io::Read,
-    O: io::Write,
+pub async fn start_repl(stream: TcpStream) -> io::Result<()>
 {
-    let mut buf = [0; 4];
+    let (mut input, mut output) = stream.into_split();
+    let mut buf = [0; 1024];
     let mut reader = Reader::new();
 
+    let mut env = Env::new();
+    env.set(
+        ZapExp::Symbol("f".to_string()),
+        ZapExp::Str("Felix".to_string()),
+    )
+    .unwrap();
+
+    load(&mut env);
+
     loop {
-        output.write("> ".as_bytes())?;
-        output.flush()?;
-
-        let mut env = Env::new();
-        env.set(
-            ZapExp::Symbol("f".to_string()),
-            ZapExp::Str("Felix".to_string()),
-        )
-        .unwrap();
-
-        load(&mut env);
+        output.write("> ".as_bytes()).await?;
+        output.flush().await?;
 
         loop {
-            let n = input.read(&mut buf[..])?;
+            let n = match input.read(&mut buf[..]).await {
+                Ok(0) => return Ok(()),
+                Ok(n) => n,
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    continue;
+                }
+                Err(e) => {
+                    return Err(e.into());
+                }
+            };
 
             let src = std::str::from_utf8(&buf[..n]).unwrap();
             reader.tokenize(src);
@@ -41,17 +50,17 @@ where
                         match eval(form, &mut env)  {
                             Ok(result) => {
                                 let end = Instant::now();
-                                output.write_fmt(format_args!("Evaluated in {:?}\n", end - start))?;
-                                output.write_fmt(format_args!("{}\n", result.pr_str()))?;
+                                output.write(format!("Evaluated in {:?}\n", end - start).as_bytes()).await?;
+                                output.write(format!("{}\n", result.pr_str()).as_bytes()).await?;
                             }
                             Err(ZapErr::Msg(err)) => {
-                                output.write_fmt(format_args!("Eval error: {}\n", err))?;
+                                output.write(format!("Eval error: {}\n", err).as_bytes()).await?;
                             }
                         }
                     },
                     Ok(None) => break,
                     Err(ZapErr::Msg(err)) => {
-                        output.write_fmt(format_args!("Reader error: {}\n", err))?;
+                        output.write(format!("Reader error: {}\n", err).as_bytes()).await?;
                     }
                 }
             }
