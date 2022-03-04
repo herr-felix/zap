@@ -1,19 +1,16 @@
+use fnv::FnvHashMap;
 use std::borrow::BorrowMut;
-//use std::collections::HashMap;
-use std::collections::BTreeMap;
 
-use crate::types::{error, ZapErr, ZapExp};
+use crate::types::{error, ZapExp, ZapResult};
 
 pub struct Env {
-//    root: HashMap<String, ZapExp>,
-    root: BTreeMap<String, ZapExp>,
+    root: FnvHashMap<String, ZapExp>,
 }
 
 impl Env {
     pub fn new() -> Env {
         Env {
-//            root: HashMap::<String, ZapExp>::new(),
-            root: BTreeMap::<String, ZapExp>::new(),
+            root: FnvHashMap::<String, ZapExp>::default(),
         }
     }
 
@@ -21,7 +18,12 @@ impl Env {
         self.root.get(key).and_then(|val| Some(val.clone()))
     }
 
-    pub fn set(&mut self, key: ZapExp, val: ZapExp) -> Result<ZapExp, ZapErr> {
+    pub fn reg_fn(&mut self, symbol: &str, f: fn(&[ZapExp]) -> ZapResult) {
+        self.root
+            .insert(symbol.to_string(), ZapExp::Func(symbol.to_string(), f));
+    }
+
+    pub fn set(&mut self, key: ZapExp, val: ZapExp) -> ZapResult {
         match key {
             ZapExp::Symbol(s) => {
                 self.root.borrow_mut().insert(s, val.clone());

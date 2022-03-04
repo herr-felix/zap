@@ -1,4 +1,3 @@
-
 #[derive(Clone)]
 pub enum ZapExp {
     Nil,
@@ -21,14 +20,13 @@ pub fn error(msg: &str) -> ZapErr {
     ZapErr::Msg(msg.to_string())
 }
 
-
 impl core::ops::Add for ZapExp {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
         if let (ZapExp::Number(a), ZapExp::Number(b)) = (self, other) {
-            return ZapExp::Number(a+b)
+            return ZapExp::Number(a + b);
         }
-        return ZapExp::Nil
+        return ZapExp::Nil;
     }
 }

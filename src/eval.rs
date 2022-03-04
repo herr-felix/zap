@@ -5,17 +5,16 @@ enum Form {
     List(Vec<ZapExp>, std::vec::IntoIter<ZapExp>),
 }
 
-
+#[inline(always)]
 fn apply_list(list: Vec<ZapExp>) -> ZapResult {
     if let Some((first, args)) = list.split_first() {
         return match first {
             ZapExp::Func(_, func) => func(args),
             _ => Err(error("Only functions call be called.")),
-        }
+        };
     }
     Err(error("Cannot evaluate a empty list."))
 }
-
 
 pub fn eval(root: ZapExp, env: &mut Env) -> ZapResult {
     let mut stack = Vec::with_capacity(32);

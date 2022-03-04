@@ -10,6 +10,7 @@ path = "./src/server.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+fnv = "1.0.7"
 tokio = { version = "1", features = ["full"] }
 #regex = "1.5"
 
