@@ -1,3 +1,6 @@
+
+pub type ZapFn = fn(&[ZapExp]) -> ZapResult;
+
 #[derive(Clone)]
 pub enum ZapExp {
     Nil,
@@ -6,7 +9,7 @@ pub enum ZapExp {
     Number(f64),
     Str(String),
     List(Vec<ZapExp>),
-    Func(String, fn(&[ZapExp]) -> Result<ZapExp, ZapErr>),
+    Func(String, ZapFn),
 }
 
 impl ZapExp {
@@ -16,6 +19,17 @@ impl ZapExp {
             ZapExp::Bool(false) => false,
             _ => true,
         }
+    }
+
+    #[inline(always)]
+    pub async fn apply(list: Vec<ZapExp>) -> ZapResult {
+        if let Some((first, args)) = list.split_first() {
+            return match first {
+                ZapExp::Func(_, func) => func(args),
+                _ => Err(error("Only functions can be called.")),
+            };
+        }
+        Err(error("Cannot evaluate a empty list."))
     }
 }
 

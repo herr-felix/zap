@@ -10,17 +10,6 @@ enum Form {
 }
 
 #[inline(always)]
-fn apply_list(list: Vec<ZapExp>) -> ZapResult {
-    if let Some((first, args)) = list.split_first() {
-        return match first {
-            ZapExp::Func(_, func) => func(args),
-            _ => Err(error("Only functions call be called.")),
-        };
-    }
-    Err(error("Cannot evaluate a empty list."))
-}
-
-#[inline(always)]
 fn push_if_form(stack: &mut Vec<Form>, mut rest: ExpList) -> ZapResult {
     match (rest.next(), rest.next(), rest.next(), rest.next()) {
         (Some(head), Some(then_branch), Some(else_branch), None) => {
@@ -60,7 +49,7 @@ impl Evaluator {
         }
     }
 
-    pub fn eval(&mut self, root: ZapExp, env: &mut Env) -> ZapResult {
+    pub async fn eval(&mut self, root: ZapExp, env: &mut Env) -> ZapResult {
         self.stack.truncate(0);
         let mut exp = root;
 
@@ -105,25 +94,24 @@ impl Evaluator {
                             dst.push(exp);
                             if let Some(val) = rest.next() {
                                 self.stack.push(Form::List(dst, rest));
-                                val
+                                exp = val;
+                                break
                             } else {
-                                exp = apply_list(dst)?;
-                                continue;
+                                ZapExp::apply(dst).await?
                             }
                         }
                         Form::If(then_branch, else_branch) => {
-                            if exp.is_truish() {
+                            exp = if exp.is_truish() {
                                 then_branch
                             } else {
                                 else_branch
-                            }
+                            };
+                            break
                         }
                         Form::Quote => {
-                            exp = exp;
-                            continue;
+                            exp
                         }
                     };
-                    break;
                 } else {
                     return Ok(exp);
                 }

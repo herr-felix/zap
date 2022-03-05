@@ -7,7 +7,7 @@ use crate::core::load;
 use crate::env::Env;
 use crate::eval::Evaluator;
 use crate::reader::Reader;
-use crate::types::{ZapErr, ZapExp};
+use crate::types::{ZapErr};
 
 pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
     let (mut input, mut output) = stream.into_split();
@@ -46,7 +46,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
                             .write(format!("Reader: {}\n", form.pr_str()).as_bytes())
                             .await?;
                         let start = Instant::now();
-                        match evaluator.eval(form, &mut env) {
+                        match evaluator.eval(form, &mut env).await {
                             Ok(result) => {
                                 let end = Instant::now();
                                 output

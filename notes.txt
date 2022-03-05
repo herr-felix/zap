@@ -10,3 +10,4 @@ the mutation's timestamp, symbol associated value can be appened to a mutation l
 allowing the runtime to restart where it was, or to reset the environement to
 a certain mutation.
 
+- Async partout?

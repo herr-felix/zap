@@ -1,7 +1,7 @@
 use fnv::FnvHashMap;
 use std::borrow::BorrowMut;
 
-use crate::types::{error, ZapExp, ZapResult};
+use crate::types::{error, ZapExp, ZapResult, ZapFn};
 
 pub struct Env {
     root: FnvHashMap<String, ZapExp>,
@@ -18,7 +18,7 @@ impl Env {
         self.root.get(key).and_then(|val| Some(val.clone()))
     }
 
-    pub fn reg_fn(&mut self, symbol: &str, f: fn(&[ZapExp]) -> ZapResult) {
+    pub fn reg_fn(&mut self, symbol: &str, f: ZapFn) {
         self.root
             .insert(symbol.to_string(), ZapExp::Func(symbol.to_string(), f));
     }
