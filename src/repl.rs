@@ -5,7 +5,7 @@ use tokio::net::TcpStream;
 
 use crate::core::load;
 use crate::env::Env;
-use crate::eval::eval;
+use crate::eval::{self, eval_exp};
 use crate::reader::Reader;
 use crate::types::{ZapErr, ZapExp};
 
@@ -20,6 +20,8 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
         ZapExp::Str("Felix".to_string()),
     )
     .unwrap();
+
+    let mut stack = eval::new_stack(32);
 
     load(&mut env);
 
@@ -46,7 +48,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
                 match reader.read_form() {
                     Ok(Some(form)) => {
                         let start = Instant::now();
-                        match eval(form, &mut env) {
+                        match eval_exp(&mut stack, form, &mut env) {
                             Ok(result) => {
                                 let end = Instant::now();
                                 output
