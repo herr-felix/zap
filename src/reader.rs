@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use std::num::ParseFloatError;
 use std::str::Chars;
 
-use crate::types::{ZapErr, ZapExp};
+use crate::types::{error, ZapErr, ZapExp};
 
 /* Tokenizer */
 
@@ -204,101 +204,67 @@ impl Reader {
 
     fn read_error(&mut self, msg: &str) -> ZapErr {
         self.stack.truncate(0);
-        ZapErr::Msg(msg.to_string())
+        error(msg)
     }
 
     #[inline(always)]
-    fn expand_reader_macro(&mut self, expanded: &str, exp: ZapExp) -> Option<ParentForm> {
+    fn expand_reader_macro(&mut self, expanded: &str, exp: ZapExp) {
         self.tokens.push_front(Token::ListEnd);
-        Some(ParentForm::List(
-            [ZapExp::Symbol(expanded.to_string()), exp].into(),
-        ))
+        self.stack.push(ParentForm::List(vec![
+            ZapExp::Symbol(expanded.to_string()),
+            exp,
+        ]));
     }
 
     pub fn read_form(&mut self) -> Result<Option<ZapExp>, ZapErr> {
-        let mut head = self.stack.pop();
-
         while let Some(token) = self.tokens.pop_front() {
-            if let Some(form) = head {
-                let exp = match token {
-                    Token::Atom(s) => match form {
-                        ParentForm::List(mut seq) => {
-                            seq.push(Reader::read_atom(s));
-                            head = Some(ParentForm::List(seq));
-                            continue;
-                        }
-                        ParentForm::Quote
-                        | ParentForm::SpliceUnquote
-                        | ParentForm::Unquote
-                        | ParentForm::Deref => {
-                            self.stack.push(form);
-                            Reader::read_atom(s)
-                        }
-                    },
-                    Token::Quote => {
-                        self.stack.push(form);
-                        head = Some(ParentForm::Quote);
-                        continue;
+            let exp = match token {
+                Token::Atom(s) => Reader::read_atom(s),
+                Token::Quote => {
+                    self.stack.push(ParentForm::Quote);
+                    continue;
+                }
+                Token::SpliceUnquote => {
+                    self.stack.push(ParentForm::SpliceUnquote);
+                    continue;
+                }
+                Token::Unquote => {
+                    self.stack.push(ParentForm::Unquote);
+                    continue;
+                }
+                Token::Deref => {
+                    self.stack.push(ParentForm::Deref);
+                    continue;
+                }
+                Token::ListStart => {
+                    self.stack.push(ParentForm::List(Vec::new()));
+                    continue;
+                }
+                Token::ListEnd => match self.stack.pop() {
+                    Some(ParentForm::List(seq)) => ZapExp::List(seq),
+                    Some(ParentForm::Quote) => return Err(self.read_error("Cannot quote a ')'")),
+                    Some(ParentForm::Unquote) => {
+                        return Err(self.read_error("Cannot unquote a ')'"))
                     }
-                    Token::SpliceUnquote => {
-                        self.stack.push(form);
-                        head = Some(ParentForm::SpliceUnquote);
-                        continue;
-                    }
-                    Token::Unquote => {
-                        self.stack.push(form);
-                        head = Some(ParentForm::Unquote);
-                        continue;
-                    }
-                    Token::Deref => {
-                        self.stack.push(form);
-                        head = Some(ParentForm::Deref);
-                        continue;
-                    }
-                    Token::ListStart => {
-                        self.stack.push(form);
-                        head = Some(ParentForm::List(Vec::new()));
-                        continue;
-                    }
-                    Token::ListEnd => match form {
-                        ParentForm::List(seq) => ZapExp::List(seq),
-                        ParentForm::Quote => return Err(self.read_error("Cannot quote a ')'")),
-                        ParentForm::Unquote => return Err(self.read_error("Cannot unquote a ')'")),
-                        ParentForm::SpliceUnquote => {
-                            return Err(self.read_error("Cannot splice-unquote a ')'"))
-                        }
-                        ParentForm::Deref => return Err(self.read_error("Cannot deref a ')'")),
-                    },
-                };
-
-                head = match self.stack.pop() {
-                    Some(ParentForm::List(mut parent)) => {
-                        parent.push(exp);
-                        Some(ParentForm::List(parent))
-                    }
-                    Some(ParentForm::Quote) => self.expand_reader_macro("quote", exp),
-                    Some(ParentForm::Unquote) => self.expand_reader_macro("unquote", exp),
                     Some(ParentForm::SpliceUnquote) => {
-                        self.expand_reader_macro("splice-unquote", exp)
+                        return Err(self.read_error("Cannot splice-unquote a ')'"))
                     }
-                    Some(ParentForm::Deref) => self.expand_reader_macro("deref", exp),
-                    None => return Ok(Some(exp)),
-                }
-            } else {
-                head = match token {
-                    Token::Atom(s) => return Ok(Some(Reader::read_atom(s))),
-                    Token::Quote => Some(ParentForm::Quote),
-                    Token::Unquote => Some(ParentForm::Unquote),
-                    Token::SpliceUnquote => Some(ParentForm::SpliceUnquote),
-                    Token::Deref => Some(ParentForm::Deref),
-                    Token::ListStart => Some(ParentForm::List(Vec::new())),
-                    Token::ListEnd => return Err(self.read_error("A form cannot begin with ')'")),
-                }
-            }
-        }
+                    Some(ParentForm::Deref) => return Err(self.read_error("Cannot deref a ')'")),
+                    None => return Err(self.read_error("A form cannot begin with ')'")),
+                },
+            };
 
-        if let Some(parent) = head {
-            self.stack.push(parent);
+            match self.stack.pop() {
+                Some(ParentForm::List(mut parent)) => {
+                    parent.push(exp);
+                    self.stack.push(ParentForm::List(parent));
+                }
+                Some(ParentForm::Quote) => self.expand_reader_macro("quote", exp),
+                Some(ParentForm::Unquote) => self.expand_reader_macro("unquote", exp),
+                Some(ParentForm::SpliceUnquote) => self.expand_reader_macro("splice-unquote", exp),
+                Some(ParentForm::Deref) => self.expand_reader_macro("deref", exp),
+                None => return Ok(Some(exp)),
+            }
         }
 
         Ok(None)

@@ -26,7 +26,7 @@ fn push_if_form(stack: &mut Vec<Form>, mut rest: ExpList) -> ZapResult {
         (Some(head), Some(then_branch), Some(else_branch), None) => {
             stack.push(Form::If(then_branch, else_branch));
             Ok(head)
-        },
+        }
         _ => Err(error("an if form must contain 3 expressions.")),
     }
 }
@@ -37,12 +37,11 @@ fn push_quote_form(stack: &mut Vec<Form>, mut rest: ExpList) -> ZapResult {
         (Some(exp), None) => {
             stack.push(Form::Quote);
             Ok(exp)
-        },
+        }
         (None, None) => Err(error("nothing to quote.")),
         _ => Err(error("too many parameteres to quote")),
     }
 }
-
 
 #[inline(always)]
 fn push_list_form(stack: &mut Vec<Form>, head: ZapExp, rest: ExpList, len: usize) -> ZapExp {
@@ -64,25 +63,22 @@ pub fn eval_exp(stack: &mut Vec<Form>, root: ZapExp, env: &mut Env) -> ZapResult
                 let len = l.len();
                 let mut rest = l.into_iter();
                 match rest.next() {
-                    Some(ZapExp::Symbol(s)) =>
-                        match s.as_ref() {
-                            "if" => {
-                                exp = push_if_form(stack, rest)?;
-                                continue
-                            },
-                            "quote" => {
-                                push_quote_form(stack, rest)?
-                            },
-                            _ => {
-                                exp = push_list_form(stack, ZapExp::Symbol(s), rest, len);
-                                continue
-                            }
+                    Some(ZapExp::Symbol(s)) => match s.as_ref() {
+                        "if" => {
+                            exp = push_if_form(stack, rest)?;
+                            continue;
                         }
+                        "quote" => push_quote_form(stack, rest)?,
+                        _ => {
+                            exp = push_list_form(stack, ZapExp::Symbol(s), rest, len);
+                            continue;
+                        }
+                    },
                     Some(head) => {
                         exp = push_list_form(stack, head, rest, len);
-                        continue
-                    },
-                    None => ZapExp::List(Vec::new())
+                        continue;
+                    }
+                    None => ZapExp::List(Vec::new()),
                 }
             }
             ZapExp::Symbol(s) => {
@@ -105,22 +101,22 @@ pub fn eval_exp(stack: &mut Vec<Form>, root: ZapExp, env: &mut Env) -> ZapResult
                             val
                         } else {
                             exp = apply_list(dst)?;
-                            continue
+                            continue;
                         }
-                    },
+                    }
                     Form::If(then_branch, else_branch) => {
                         if exp.is_truish() {
                             then_branch
                         } else {
                             else_branch
                         }
-                    },
+                    }
                     Form::Quote => {
                         exp = exp;
-                        continue
-                    },
+                        continue;
+                    }
                 };
-                break
+                break;
             } else {
                 return Ok(exp);
             }

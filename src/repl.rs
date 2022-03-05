@@ -47,6 +47,9 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
             loop {
                 match reader.read_form() {
                     Ok(Some(form)) => {
+                        output
+                            .write(format!("Reader: {}\n", form.pr_str()).as_bytes())
+                            .await?;
                         let start = Instant::now();
                         match eval_exp(&mut stack, form, &mut env) {
                             Ok(result) => {
