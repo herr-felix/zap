@@ -9,35 +9,6 @@ enum Form {
     Quote,
 }
 
-#[inline(always)]
-fn push_if_form(stack: &mut Vec<Form>, mut rest: ExpList) -> ZapResult {
-    match (rest.next(), rest.next(), rest.next(), rest.next()) {
-        (Some(head), Some(then_branch), Some(else_branch), None) => {
-            stack.push(Form::If(then_branch, else_branch));
-            Ok(head)
-        }
-        _ => Err(error("an if form must contain 3 expressions.")),
-    }
-}
-
-#[inline(always)]
-fn push_quote_form(stack: &mut Vec<Form>, mut rest: ExpList) -> ZapResult {
-    match (rest.next(), rest.next()) {
-        (Some(exp), None) => {
-            stack.push(Form::Quote);
-            Ok(exp)
-        }
-        (None, None) => Err(error("nothing to quote.")),
-        _ => Err(error("too many parameteres to quote")),
-    }
-}
-
-#[inline(always)]
-fn push_list_form(stack: &mut Vec<Form>, head: ZapExp, rest: ExpList, len: usize) -> ZapExp {
-    stack.push(Form::List(Vec::with_capacity(len), rest));
-    head
-}
-
 pub struct Evaluator {
     stack: Vec<Form>,
 }
@@ -47,6 +18,35 @@ impl Evaluator {
         Evaluator {
             stack: Vec::with_capacity(32),
         }
+    }
+
+    #[inline(always)]
+    fn push_if_form(&mut self, mut rest: ExpList) -> ZapResult {
+        match (rest.next(), rest.next(), rest.next(), rest.next()) {
+            (Some(head), Some(then_branch), Some(else_branch), None) => {
+                self.stack.push(Form::If(then_branch, else_branch));
+                Ok(head)
+            }
+            _ => Err(error("an if form must contain 3 expressions.")),
+        }
+    }
+
+    #[inline(always)]
+    fn push_quote_form(&mut self, mut rest: ExpList) -> ZapResult {
+        match (rest.next(), rest.next()) {
+            (Some(exp), None) => {
+                self.stack.push(Form::Quote);
+                Ok(exp)
+            }
+            (None, None) => Err(error("nothing to quote.")),
+            _ => Err(error("too many parameteres to quote")),
+        }
+    }
+
+    #[inline(always)]
+    fn push_list_form(&mut self, head: ZapExp, rest: ExpList, len: usize) -> ZapExp {
+        self.stack.push(Form::List(Vec::with_capacity(len), rest));
+        head
     }
 
     pub async fn eval(&mut self, root: ZapExp, env: &mut Env) -> ZapResult {
@@ -61,17 +61,17 @@ impl Evaluator {
                     match rest.next() {
                         Some(ZapExp::Symbol(s)) => match s.as_ref() {
                             "if" => {
-                                exp = push_if_form(&mut self.stack, rest)?;
+                                exp = self.push_if_form(rest)?;
                                 continue;
                             }
-                            "quote" => push_quote_form(&mut self.stack, rest)?,
+                            "quote" => self.push_quote_form(rest)?,
                             _ => {
-                                exp = push_list_form(&mut self.stack, ZapExp::Symbol(s), rest, len);
+                                exp = self.push_list_form(ZapExp::Symbol(s), rest, len);
                                 continue;
                             }
                         },
                         Some(head) => {
-                            exp = push_list_form(&mut self.stack, head, rest, len);
+                            exp = self.push_list_form(head, rest, len);
                             continue;
                         }
                         None => ZapExp::List(Vec::new()),

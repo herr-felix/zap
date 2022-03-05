@@ -317,5 +317,20 @@ name = "zap"
 version = "0.1.0"
 dependencies = [
  "fnv",
+]
+
+[[package]]
+name = "zap-core"
+version = "0.1.0"
+dependencies = [
+ "zap",
+]
+
+[[package]]
+name = "zap-server"
+version = "0.1.0"
+dependencies = [
  "tokio",
+ "zap",
+ "zap-core",
 ]

@@ -3,20 +3,21 @@ use std::time::Instant;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::core::load;
-use crate::env::Env;
-use crate::eval::Evaluator;
-use crate::reader::Reader;
-use crate::types::{ZapErr};
+use zap_core;
+use zap::env::Env;
+use zap::eval::Evaluator;
+use zap::reader::Reader;
+use zap::types::{ZapErr};
 
 pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
     let (mut input, mut output) = stream.into_split();
-    let mut buf = [0; 1024];
-    let mut reader = Reader::new();
 
+    let mut buf = [0; 1024];
+
+    let mut reader = Reader::new();
     let mut env = Env::new();
 
-    load(&mut env);
+    zap_core::load(&mut env);
 
     let mut evaluator = Evaluator::new();
 

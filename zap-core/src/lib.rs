@@ -1,6 +1,6 @@
-use crate::env::Env;
-use crate::types::ZapExp::Number;
-use crate::types::{error, ZapExp, ZapResult};
+use zap::env::Env;
+use zap::types::ZapExp::Number;
+use zap::types::{error, ZapExp, ZapResult};
 
 fn plus(args: &[ZapExp]) -> ZapResult {
     let mut sum = 0.0;

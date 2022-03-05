@@ -1,10 +1,4 @@
-mod core;
-mod env;
-mod eval;
-mod printer;
-mod reader;
 mod repl;
-mod types;
 
 use tokio::net::TcpListener;
 
