@@ -6,6 +6,7 @@ use std::mem;
 enum Form {
     List(Vec<ZapExp>, usize),
     If(ZapExp, ZapExp),
+    Do(Vec<ZapExp>, usize),
     Quote,
 }
 
@@ -52,10 +53,20 @@ impl Evaluator {
     }
 
     #[inline(always)]
-    fn push_list_form(&mut self, mut list: Vec<ZapExp>, idx: usize) -> ZapExp {
-        let element = swap_exp(&mut list, idx, ZapExp::Nil);
-        self.stack.push(Form::List(list, idx));
-        element
+    fn push_list_form(&mut self, mut list: Vec<ZapExp>) -> ZapExp {
+        let first = swap_exp(&mut list, 0, ZapExp::Nil);
+        self.stack.push(Form::List(list, 0));
+        first
+    }
+
+    #[inline(always)]
+    fn push_do_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
+        if list.len() == 1 {
+            return Err(error("'do' forms needs at least one inner form"));
+        }
+        let first = swap_exp(&mut list, 1, ZapExp::Nil);
+        self.stack.push(Form::Do(list, 1));
+        Ok(first)
     }
 
     pub async fn eval<E: Env>(&mut self, root: ZapExp, env: &mut E) -> ZapResult {
@@ -70,14 +81,18 @@ impl Evaluator {
                             exp = self.push_if_form(list)?;
                             continue;
                         }
+                        "do" => {
+                            exp = self.push_do_form(list)?;
+                            continue;
+                        }
                         "quote" => self.push_quote_form(list)?,
                         _ => {
-                            exp = self.push_list_form(list, 0);
+                            exp = self.push_list_form(list);
                             continue;
                         }
                     },
                     Some(_) => {
-                        exp = self.push_list_form(list, 0);
+                        exp = self.push_list_form(list);
                         continue;
                     }
                     None => ZapExp::List(list),
@@ -107,6 +122,15 @@ impl Evaluator {
                                 else_branch
                             };
                             break;
+                        }
+                        Form::Do(mut list, mut idx) => {
+                            idx += 1;
+                            if let Some(val) = list.get_mut(idx) {
+                                exp = mem::replace(val, ZapExp::Nil);
+                                self.stack.push(Form::Do(list, idx));
+                                break;
+                            }
+                            exp
                         }
                         Form::Quote => exp,
                     };
