@@ -18,7 +18,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
 
     zap_core::load(&mut env);
 
-    let mut evaluator = Evaluator::new();
+    let mut evaluator = Evaluator::default();
 
     loop {
         output.write("> ".as_bytes()).await?;

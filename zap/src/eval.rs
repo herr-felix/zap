@@ -1,10 +1,10 @@
 use crate::env::Env;
 use crate::types::{error, ZapExp, ZapResult};
 
-type ExpList = std::vec::IntoIter<ZapExp>;
+use std::mem;
 
 enum Form {
-    List(Vec<ZapExp>, ExpList),
+    List(Vec<ZapExp>, usize),
     If(ZapExp, ZapExp),
     Quote,
 }
@@ -15,21 +15,22 @@ pub struct Evaluator {
 
 impl Default for Evaluator {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Evaluator {
-    pub fn new() -> Evaluator {
         Evaluator {
             stack: Vec::with_capacity(32),
         }
     }
+}
 
+#[inline(always)]
+fn swap_exp(list: &mut Vec<ZapExp>, idx: usize, exp: ZapExp) -> ZapExp {
+    mem::replace(list.get_mut(idx).unwrap(), exp)
+}
+
+impl Evaluator {
     #[inline(always)]
-    fn push_if_form(&mut self, mut rest: ExpList) -> ZapResult {
-        match (rest.next(), rest.next(), rest.next(), rest.next()) {
-            (Some(head), Some(then_branch), Some(else_branch), None) => {
+    fn push_if_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
+        match (list.pop(), list.pop(), list.pop(), list.pop(), list.pop()) {
+            (Some(else_branch), Some(then_branch), Some(head), Some(_), None) => {
                 self.stack.push(Form::If(then_branch, else_branch));
                 Ok(head)
             }
@@ -38,21 +39,23 @@ impl Evaluator {
     }
 
     #[inline(always)]
-    fn push_quote_form(&mut self, mut rest: ExpList) -> ZapResult {
-        match (rest.next(), rest.next()) {
-            (Some(exp), None) => {
+    fn push_quote_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
+        match list.len() {
+            2 => {
                 self.stack.push(Form::Quote);
+                let exp = swap_exp(&mut list, 1, ZapExp::Nil);
                 Ok(exp)
             }
-            (None, None) => Err(error("nothing to quote.")),
-            _ => Err(error("too many parameteres to quote")),
+            x if x > 2 => Err(error("too many parameteres to quote")),
+            _ => Err(error("nothing to quote.")),
         }
     }
 
     #[inline(always)]
-    fn push_list_form(&mut self, head: ZapExp, rest: ExpList, len: usize) -> ZapExp {
-        self.stack.push(Form::List(Vec::with_capacity(len), rest));
-        head
+    fn push_list_form(&mut self, mut list: Vec<ZapExp>, idx: usize) -> ZapExp {
+        let element = swap_exp(&mut list, idx, ZapExp::Nil);
+        self.stack.push(Form::List(list, idx));
+        element
     }
 
     pub async fn eval<E: Env>(&mut self, root: ZapExp, env: &mut E) -> ZapResult {
@@ -61,28 +64,24 @@ impl Evaluator {
 
         loop {
             exp = match exp {
-                ZapExp::List(l) => {
-                    let len = l.len();
-                    let mut rest = l.into_iter();
-                    match rest.next() {
-                        Some(ZapExp::Symbol(s)) => match s.as_ref() {
-                            "if" => {
-                                exp = self.push_if_form(rest)?;
-                                continue;
-                            }
-                            "quote" => self.push_quote_form(rest)?,
-                            _ => {
-                                exp = self.push_list_form(ZapExp::Symbol(s), rest, len);
-                                continue;
-                            }
-                        },
-                        Some(head) => {
-                            exp = self.push_list_form(head, rest, len);
+                ZapExp::List(list) => match list.first() {
+                    Some(ZapExp::Symbol(s)) => match s.as_ref() {
+                        "if" => {
+                            exp = self.push_if_form(list)?;
                             continue;
                         }
-                        None => ZapExp::List(Vec::new()),
+                        "quote" => self.push_quote_form(list)?,
+                        _ => {
+                            exp = self.push_list_form(list, 0);
+                            continue;
+                        }
+                    },
+                    Some(_) => {
+                        exp = self.push_list_form(list, 0);
+                        continue;
                     }
-                }
+                    None => ZapExp::List(list),
+                },
                 ZapExp::Symbol(s) => env.get(&s)?,
                 exp => exp,
             };
@@ -90,14 +89,15 @@ impl Evaluator {
             loop {
                 if let Some(parent) = self.stack.pop() {
                     exp = match parent {
-                        Form::List(mut dst, mut rest) => {
-                            dst.push(exp);
-                            if let Some(val) = rest.next() {
-                                self.stack.push(Form::List(dst, rest));
-                                exp = val;
+                        Form::List(mut list, mut idx) => {
+                            swap_exp(&mut list, idx, exp);
+                            idx += 1;
+                            if let Some(val) = list.get_mut(idx) {
+                                exp = mem::replace(val, ZapExp::Nil);
+                                self.stack.push(Form::List(list, idx));
                                 break;
                             } else {
-                                ZapExp::apply(dst).await?
+                                ZapExp::apply(list).await?
                             }
                         }
                         Form::If(then_branch, else_branch) => {

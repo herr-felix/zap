@@ -8,6 +8,8 @@ use crate::repl::start_repl;
 async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("0.0.0.0:2020").await.unwrap();
 
+    println!("Server listening.");
+
     // accept connections and process them serially
     loop {
         let (socket, _) = listener.accept().await.unwrap();
