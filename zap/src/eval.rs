@@ -83,9 +83,7 @@ impl Evaluator {
                         None => ZapExp::List(Vec::new()),
                     }
                 }
-                ZapExp::Symbol(s) => {
-                    env.get(&s)?
-                }
+                ZapExp::Symbol(s) => env.get(&s)?,
                 exp => exp,
             };
 
@@ -97,7 +95,7 @@ impl Evaluator {
                             if let Some(val) = rest.next() {
                                 self.stack.push(Form::List(dst, rest));
                                 exp = val;
-                                break
+                                break;
                             } else {
                                 ZapExp::apply(dst).await?
                             }
@@ -108,11 +106,9 @@ impl Evaluator {
                             } else {
                                 else_branch
                             };
-                            break
+                            break;
                         }
-                        Form::Quote => {
-                            exp
-                        }
+                        Form::Quote => exp,
                     };
                 } else {
                     return Ok(exp);

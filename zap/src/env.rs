@@ -1,7 +1,7 @@
 use fnv::FnvHashMap;
 use std::mem;
 
-use crate::types::{error, ZapExp, ZapResult, ZapFn};
+use crate::types::{error, ZapExp, ZapFn, ZapResult};
 
 type Scope = FnvHashMap<String, ZapExp>;
 
@@ -34,20 +34,20 @@ impl Env for BasicEnv {
     }
 
     fn get(&self, key: &str) -> ZapResult {
-        self.scope.get(key).cloned().ok_or_else(|| {
-            error(format!("symbol '{}' not in scope.", key).as_str())
-        })
+        self.scope
+            .get(key)
+            .cloned()
+            .ok_or_else(|| error(format!("symbol '{}' not in scope.", key).as_str()))
     }
 
     fn set(&mut self, key: ZapExp, val: ZapExp) -> ZapResult {
         if let ZapExp::Symbol(s) = key {
-            if let Some(prev) = self.scope.insert(s.clone(), val.clone()){
+            if let Some(prev) = self.scope.insert(s.clone(), val.clone()) {
                 // We put the previous value in shadow, if there was any.
                 self.shadow.entry(s).or_insert(prev);
             }
             Ok(val)
-        }
-        else {
+        } else {
             Err(error("Only symbols can be used for keys in env"))
         }
     }

@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use zap::env::BasicEnv;
 use zap::eval::Evaluator;
 use zap::reader::Reader;
-use zap::types::{ZapErr};
+use zap::types::ZapErr;
 
 pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
     let (mut input, mut output) = stream.into_split();
