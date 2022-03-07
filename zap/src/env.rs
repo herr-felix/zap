@@ -9,7 +9,7 @@ pub trait Env {
     fn push(&mut self);
     fn pop(&mut self);
     fn get(&self, key: &str) -> ZapResult;
-    fn set(&mut self, key: ZapExp, val: ZapExp) -> ZapResult;
+    fn set(&mut self, key: String, val: ZapExp) -> ZapExp;
     fn reg_fn(&mut self, symbol: &str, f: ZapFn);
 }
 
@@ -40,16 +40,12 @@ impl Env for BasicEnv {
             .ok_or_else(|| error(format!("symbol '{}' not in scope.", key).as_str()))
     }
 
-    fn set(&mut self, key: ZapExp, val: ZapExp) -> ZapResult {
-        if let ZapExp::Symbol(s) = key {
-            if let Some(prev) = self.scope.insert(s.clone(), val.clone()) {
-                // We put the previous value in shadow, if there was any.
-                self.shadow.entry(s).or_insert(prev);
-            }
-            Ok(val)
-        } else {
-            Err(error("Only symbols can be used for keys in env"))
+    fn set(&mut self, key: String, val: ZapExp) -> ZapExp {
+        if let Some(prev) = self.scope.insert(key.clone(), val.clone()) {
+            // We put the previous value in shadow, if there was any.
+            self.shadow.entry(key).or_insert(prev);
         }
+        val
     }
 
     fn reg_fn(&mut self, symbol: &str, f: ZapFn) {

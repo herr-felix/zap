@@ -7,6 +7,7 @@ enum Form {
     List(Vec<ZapExp>, usize),
     If(ZapExp, ZapExp),
     Do(Vec<ZapExp>, usize),
+    Define(String),
     Quote,
 }
 
@@ -60,6 +61,24 @@ impl Evaluator {
     }
 
     #[inline(always)]
+    fn push_define_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
+        match list.len() {
+            3 => {
+                let exp = list.pop().unwrap();
+                match list.pop().unwrap() {
+                    ZapExp::Symbol(symbol) => {
+                        self.stack.push(Form::Define(symbol));
+                        Ok(exp)
+                    }
+                    _ => Err(error("'define' first form must be a symbol")),
+                }
+            }
+            x if x > 3 => Err(error("'define' only need a symbol and an expression")),
+            _ => Err(error("'define' needs a symbol and an expression"))
+        }
+    }
+
+    #[inline(always)]
     fn push_do_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
         if list.len() == 1 {
             return Err(error("'do' forms needs at least one inner form"));
@@ -83,6 +102,10 @@ impl Evaluator {
                         }
                         "do" => {
                             exp = self.push_do_form(list)?;
+                            continue;
+                        }
+                        "define" => {
+                            exp = self.push_define_form(list)?;
                             continue;
                         }
                         "quote" => self.push_quote_form(list)?,
@@ -122,6 +145,9 @@ impl Evaluator {
                                 else_branch
                             };
                             break;
+                        }
+                        Form::Define(symbol) => {
+                            env.set(symbol, exp)
                         }
                         Form::Do(mut list, mut idx) => {
                             idx += 1;
