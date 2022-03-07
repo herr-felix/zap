@@ -1,4 +1,3 @@
-
 pub type ZapFn = fn(&[ZapExp]) -> ZapResult;
 
 #[derive(Clone)]
