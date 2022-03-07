@@ -14,11 +14,7 @@ pub enum ZapExp {
 
 impl ZapExp {
     pub fn is_truish(&self) -> bool {
-        match *self {
-            ZapExp::Nil => false,
-            ZapExp::Bool(false) => false,
-            _ => true,
-        }
+        !matches!(*self, ZapExp::Nil | ZapExp::Bool(false))
     }
 
     #[inline(always)]
@@ -40,7 +36,7 @@ impl core::ops::Add for ZapExp {
         if let (ZapExp::Number(a), ZapExp::Number(b)) = (self, other) {
             return ZapExp::Number(a + b);
         }
-        return ZapExp::Nil;
+        ZapExp::Nil
     }
 }
 

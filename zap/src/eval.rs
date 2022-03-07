@@ -13,6 +13,12 @@ pub struct Evaluator {
     stack: Vec<Form>,
 }
 
+impl Default for Evaluator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Evaluator {
     pub fn new() -> Evaluator {
         Evaluator {
@@ -49,7 +55,7 @@ impl Evaluator {
         head
     }
 
-    pub async fn eval(&mut self, root: ZapExp, env: &mut Env) -> ZapResult {
+    pub async fn eval<E: Env>(&mut self, root: ZapExp, env: &mut E) -> ZapResult {
         self.stack.truncate(0);
         let mut exp = root;
 
@@ -78,11 +84,7 @@ impl Evaluator {
                     }
                 }
                 ZapExp::Symbol(s) => {
-                    if let Some(val) = env.get(&s) {
-                        val
-                    } else {
-                        return Err(error(format!("symbol '{}' not in scope.", s).as_str()));
-                    }
+                    env.get(&s)?
                 }
                 exp => exp,
             };

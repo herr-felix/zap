@@ -6,7 +6,7 @@ pub mod reader;
 pub mod types;
 
 pub trait Evaluator {
-    fn eval(&mut self, env: &mut env::Env);
+    fn eval<E: env::Env>(&mut self, env: &mut E);
 }
 
 #[cfg(test)]

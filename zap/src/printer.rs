@@ -1,9 +1,9 @@
 use crate::types::ZapExp;
 
 fn escape_str(s: String) -> String {
-    s.replace("\"", "\\\"")
-        .replace("\\", "\\\\")
-        .replace("\n", "\\n")
+    s.replace('"', "\\\"")
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
 }
 
 impl ZapExp {
@@ -21,7 +21,7 @@ impl ZapExp {
     }
 }
 
-fn pr_seq(seq: &Vec<ZapExp>, start: &str, end: &str) -> String {
+fn pr_seq(seq: &[ZapExp], start: &str, end: &str) -> String {
     let strs: Vec<String> = seq.iter().map(|x| x.pr_str()).collect();
     format!("{}{}{}", start, strs.join(" "), end)
 }
