@@ -1,7 +1,7 @@
 use fnv::FnvHashMap;
 use std::mem;
 
-use crate::types::{error, ZapExp, ZapFn, ZapResult};
+use crate::types::{error, ZapExp, ZapFn, ZapFnRef, ZapResult};
 
 type Scope = FnvHashMap<String, ZapExp>;
 
@@ -10,7 +10,7 @@ pub trait Env {
     fn pop(&mut self);
     fn get(&self, key: &str) -> ZapResult;
     fn set(&mut self, key: String, val: ZapExp);
-    fn reg_fn(&mut self, symbol: &str, f: ZapFn);
+    fn reg_fn(&mut self, symbol: &str, f: ZapFnRef);
 }
 
 #[derive(Default)]
@@ -48,8 +48,8 @@ impl Env for BasicEnv {
         }
     }
 
-    fn reg_fn(&mut self, symbol: &str, f: ZapFn) {
+    fn reg_fn(&mut self, symbol: &str, f: ZapFnRef) {
         self.scope
-            .insert(symbol.to_string(), ZapExp::Func(symbol.to_string(), f));
+            .insert(symbol.to_string(), ZapExp::Func(ZapFn::new(symbol.to_string(), f)));
     }
 }

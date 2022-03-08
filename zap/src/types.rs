@@ -1,4 +1,22 @@
-pub type ZapFn = fn(&[ZapExp]) -> ZapResult;
+
+pub type ZapFnRef = fn(&[ZapExp]) -> ZapResult;
+
+#[derive(Clone)]
+pub struct ZapFn {
+    name: String,
+    func: ZapFnRef,
+}
+
+impl ZapFn {
+    pub fn new(name: String, func: ZapFnRef) -> Box<Self> {
+        Box::new(ZapFn{name, func})
+    }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+}
+
 
 #[derive(Clone)]
 pub enum ZapExp {
@@ -8,7 +26,7 @@ pub enum ZapExp {
     Number(f64),
     Str(String),
     List(Vec<ZapExp>),
-    Func(String, ZapFn),
+    Func(Box<ZapFn>),
 }
 
 impl ZapExp {
@@ -20,7 +38,7 @@ impl ZapExp {
     pub async fn apply(list: Vec<ZapExp>) -> ZapResult {
         if let Some((first, args)) = list.split_first() {
             return match first {
-                ZapExp::Func(_, func) => func(args),
+                ZapExp::Func(f) => ((*f).func)(args),
                 _ => Err(error("Only functions can be called.")),
             };
         }
