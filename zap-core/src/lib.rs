@@ -57,12 +57,12 @@ fn concat(args: &[ZapExp]) -> ZapResult {
         }
     }
 
-    let mut result = String::with_capacity(len);
+    let mut result = std::string::String::with_capacity(len);
     for s in strs {
         result.push_str(s);
     }
 
-    Ok(ZapExp::Str(result))
+    Ok(ZapExp::Str(result.into()))
 }
 
 pub fn load<E: Env>(env: &mut E) {

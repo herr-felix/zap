@@ -1,3 +1,5 @@
+use smartstring::alias::String;
+
 pub type ZapFnRef = fn(&[ZapExp]) -> ZapResult;
 
 #[derive(Clone)]
@@ -57,7 +59,7 @@ impl core::ops::Add for ZapExp {
 
 #[derive(Debug)]
 pub enum ZapErr {
-    Msg(String),
+    Msg(std::string::String),
 }
 
 pub fn error(msg: &str) -> ZapErr {

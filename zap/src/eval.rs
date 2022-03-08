@@ -1,5 +1,6 @@
 use crate::env::Env;
 use crate::types::{error, ZapExp, ZapResult};
+use smartstring::alias::String;
 
 use std::mem;
 
@@ -55,9 +56,9 @@ impl Evaluator {
     }
 
     #[inline(always)]
-    fn push_list_form(&mut self, mut list: Vec<ZapExp>) -> ZapExp {
-        let first = swap_exp(&mut list, 0, ZapExp::Nil);
-        self.stack.push(Form::List(list, 0));
+    fn push_list_form(&mut self, mut list: Vec<ZapExp>, idx: usize) -> ZapExp {
+        let first = swap_exp(&mut list, idx, ZapExp::Nil);
+        self.stack.push(Form::List(list, idx));
         first
     }
 
@@ -122,34 +123,43 @@ impl Evaluator {
 
         loop {
             exp = match exp {
-                ZapExp::List(list) => match list.first() {
-                    Some(ZapExp::Symbol(s)) => match s.as_ref() {
-                        "if" => {
-                            exp = self.push_if_form(list)?;
-                            continue;
+                ZapExp::List(mut list) => {
+                    if let Some(first) = list.first_mut() {
+                        match first {
+                            ZapExp::Symbol(ref s) => match s.as_ref() {
+                                "if" => {
+                                    exp = self.push_if_form(list)?;
+                                    continue;
+                                }
+                                "let" => self.push_let_form(list, env)?,
+                                "do" => {
+                                    exp = self.push_do_form(list)?;
+                                    continue;
+                                }
+                                "define" => {
+                                    exp = self.push_define_form(list)?;
+                                    continue;
+                                }
+                                "quote" => self.push_quote_form(list)?,
+                                _ => {
+                                    env.get(first)?;
+                                    exp = self.push_list_form(list, 1);
+                                    continue;
+                                }
+                            },
+                            _ => {
+                                exp = self.push_list_form(list, 0);
+                                continue;
+                            }
                         }
-                        "let" => self.push_let_form(list, env)?,
-                        "do" => {
-                            exp = self.push_do_form(list)?;
-                            continue;
-                        }
-                        "define" => {
-                            exp = self.push_define_form(list)?;
-                            continue;
-                        }
-                        "quote" => self.push_quote_form(list)?,
-                        _ => {
-                            exp = self.push_list_form(list);
-                            continue;
-                        }
-                    },
-                    Some(_) => {
-                        exp = self.push_list_form(list);
-                        continue;
+                    } else {
+                        ZapExp::List(list)
                     }
-                    None => ZapExp::List(list),
-                },
-                ZapExp::Symbol(s) => env.get(&s)?,
+                }
+                ZapExp::Symbol(_) => {
+                    env.get(&mut exp)?;
+                    exp
+                }
                 exp => exp,
             };
 

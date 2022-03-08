@@ -1,14 +1,15 @@
 use fnv::FnvHashMap;
+use smartstring::alias::String;
 use std::mem;
 
-use crate::types::{error, ZapExp, ZapFn, ZapFnRef, ZapResult};
+use crate::types::{error, ZapErr, ZapExp, ZapFn, ZapFnRef};
 
 type Scope = FnvHashMap<String, ZapExp>;
 
 pub trait Env {
     fn push(&mut self);
     fn pop(&mut self);
-    fn get(&self, key: &str) -> ZapResult;
+    fn get(&self, symbol: &mut ZapExp) -> Result<(), ZapErr>;
     fn set(&mut self, key: String, val: ZapExp);
     fn reg_fn(&mut self, symbol: &str, f: ZapFnRef);
 }
@@ -34,11 +35,17 @@ impl Env for BasicEnv {
     }
 
     #[inline(always)]
-    fn get(&self, key: &str) -> ZapResult {
-        self.scope
-            .get(key)
-            .cloned()
-            .ok_or_else(|| error(format!("symbol '{}' not in scope.", key).as_str()))
+    fn get(&self, symbol: &mut ZapExp) -> Result<(), ZapErr> {
+        if let ZapExp::Symbol(ref key) = symbol {
+            self.scope
+                .get(key)
+                .ok_or_else(|| error(format!("symbol '{}' not in scope.", key).as_str()))
+                .map(|v| {
+                    symbol.clone_from(v);
+                })
+        } else {
+            Err(error("env.get: only symbols can be used as keys."))
+        }
     }
 
     fn set(&mut self, key: String, val: ZapExp) {
@@ -50,8 +57,8 @@ impl Env for BasicEnv {
 
     fn reg_fn(&mut self, symbol: &str, f: ZapFnRef) {
         self.scope.insert(
-            symbol.to_string(),
-            ZapExp::Func(ZapFn::new(symbol.to_string(), f)),
+            String::from(symbol),
+            ZapExp::Func(ZapFn::new(String::from(symbol), f)),
         );
     }
 }

@@ -1,3 +1,5 @@
+use smartstring::alias::String;
+
 use std::collections::VecDeque;
 use std::iter::Peekable;
 use std::num::ParseFloatError;
@@ -9,7 +11,7 @@ use crate::types::{error, ZapErr, ZapExp};
 
 #[derive(PartialEq)]
 enum Token {
-    Atom(String),
+    Atom(std::string::String),
     Quote,
     Unquote,
     ListStart,
@@ -42,7 +44,7 @@ enum ParentForm {
 
 pub struct Reader {
     tokens: VecDeque<Token>,
-    token_buf: String,
+    token_buf: std::string::String,
     stack: Vec<ParentForm>,
 }
 
@@ -56,7 +58,7 @@ impl Reader {
     pub fn new() -> Reader {
         Reader {
             tokens: VecDeque::new(),
-            token_buf: String::with_capacity(32),
+            token_buf: std::string::String::with_capacity(32),
             stack: Vec::with_capacity(64),
         }
     }
@@ -191,20 +193,20 @@ impl Reader {
         }
     }
 
-    fn read_atom(mut atom: String) -> ZapExp {
+    fn read_atom(mut atom: std::string::String) -> ZapExp {
         match atom.as_ref() {
             "nil" => ZapExp::Nil,
             "true" => ZapExp::Bool(true),
             "false" => ZapExp::Bool(false),
             _ => {
                 if atom.starts_with('"') {
-                    return ZapExp::Str(atom.split_off(1));
+                    return ZapExp::Str(String::from(atom.split_off(1)));
                 }
 
                 let potential_float: Result<f64, ParseFloatError> = atom.parse();
                 match potential_float {
                     Ok(v) => ZapExp::Number(v),
-                    Err(_) => ZapExp::Symbol(atom),
+                    Err(_) => ZapExp::Symbol(String::from(atom)),
                 }
             }
         }
@@ -219,7 +221,7 @@ impl Reader {
     fn expand_reader_macro(&mut self, expanded: &str, exp: ZapExp) {
         self.tokens.push_front(Token::ListEnd);
         self.stack.push(ParentForm::List(vec![
-            ZapExp::Symbol(expanded.to_string()),
+            ZapExp::Symbol(String::from(expanded)),
             exp,
         ]));
     }
