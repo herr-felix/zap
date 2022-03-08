@@ -33,6 +33,7 @@ impl Env for BasicEnv {
         }
     }
 
+    #[inline(always)]
     fn get(&self, key: &str) -> ZapResult {
         self.scope
             .get(key)
