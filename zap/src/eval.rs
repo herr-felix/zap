@@ -25,11 +25,6 @@ impl Default for Evaluator {
     }
 }
 
-#[inline(always)]
-fn swap_exp(list: &mut Vec<ZapExp>, idx: usize, exp: ZapExp) -> ZapExp {
-    mem::replace(list.get_mut(idx).unwrap(), exp)
-}
-
 impl Evaluator {
     #[inline(always)]
     fn push_if_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
@@ -47,7 +42,7 @@ impl Evaluator {
         match list.len() {
             2 => {
                 self.stack.push(Form::Quote);
-                let exp = swap_exp(&mut list, 1, ZapExp::Nil);
+                let exp = mem::take(list.get_mut(1).unwrap());
                 Ok(exp)
             }
             x if x > 2 => Err(error("too many parameteres to quote")),
@@ -56,10 +51,10 @@ impl Evaluator {
     }
 
     #[inline(always)]
-    fn push_list_form(&mut self, mut list: Vec<ZapExp>, idx: usize) -> ZapExp {
-        let first = swap_exp(&mut list, idx, ZapExp::Nil);
-        self.stack.push(Form::List(list, idx));
-        first
+    fn push_list_form(&mut self, mut list: Vec<ZapExp>) -> ZapExp {
+        let next = mem::take(list.get_mut(0).unwrap());
+        self.stack.push(Form::List(list, 0));
+        next
     }
 
     #[inline(always)]
@@ -78,7 +73,7 @@ impl Evaluator {
                         ));
                     }
                     env.push();
-                    let first = swap_exp(&mut bindings, 0, ZapExp::Nil); // We know there is at least 2 in there.
+                    let first = mem::take(bindings.get_mut(0).unwrap()); // We know there is at least 2 in there.
                     self.stack.push(Form::Let(bindings, 0, exp));
                     Ok(first)
                 } else {
@@ -112,7 +107,7 @@ impl Evaluator {
         if list.len() == 1 {
             return Err(error("'do' forms needs at least one inner form"));
         }
-        let first = swap_exp(&mut list, 1, ZapExp::Nil);
+        let first = mem::take(list.get_mut(1).unwrap());
         self.stack.push(Form::Do(list, 1));
         Ok(first)
     }
@@ -143,12 +138,11 @@ impl Evaluator {
                                 "quote" => self.push_quote_form(list)?,
                                 _ => {
                                     env.get(first)?;
-                                    exp = self.push_list_form(list, 1);
-                                    continue;
+                                    self.push_list_form(list)
                                 }
                             },
                             _ => {
-                                exp = self.push_list_form(list, 0);
+                                exp = self.push_list_form(list);
                                 continue;
                             }
                         }
@@ -167,10 +161,10 @@ impl Evaluator {
                 if let Some(parent) = self.stack.pop() {
                     exp = match parent {
                         Form::List(mut list, mut idx) => {
-                            swap_exp(&mut list, idx, exp);
+                            exp = mem::replace(list.get_mut(idx).unwrap(), exp);
                             idx += 1;
-                            if let Some(val) = list.get_mut(idx) {
-                                exp = mem::replace(val, ZapExp::Nil);
+                            if let Some(next) = list.get_mut(idx) {
+                                mem::swap(&mut exp, next);
                                 self.stack.push(Form::List(list, idx));
                                 break;
                             } else {
@@ -195,7 +189,7 @@ impl Evaluator {
                                 // idx is even, so exp is a key
                                 if matches!(exp, ZapExp::Symbol(_)) {
                                     idx += 1;
-                                    exp = swap_exp(&mut bindings, idx, exp);
+                                    exp = mem::replace(bindings.get_mut(idx).unwrap(), exp);
                                     self.stack.push(Form::Let(bindings, idx, tail));
                                     exp
                                 } else {
@@ -203,16 +197,20 @@ impl Evaluator {
                                 }
                             } else {
                                 // idx is odd, so exp is a value
-                                let key = swap_exp(&mut bindings, idx, ZapExp::Nil);
+                                let key = mem::take(bindings.get_mut(idx).unwrap());
                                 match (key, exp) {
                                     (ZapExp::Symbol(s), val) => {
                                         idx += 1;
                                         env.set(s, val);
                                         if len == idx {
-                                            self.stack.push(Form::Let(bindings, idx, ZapExp::Nil));
+                                            self.stack.push(Form::Let(
+                                                bindings,
+                                                idx,
+                                                ZapExp::default(),
+                                            ));
                                             tail
                                         } else {
-                                            exp = swap_exp(&mut bindings, idx, ZapExp::Nil);
+                                            exp = mem::take(bindings.get_mut(idx).unwrap());
                                             self.stack.push(Form::Let(bindings, idx, tail));
                                             continue;
                                         }

@@ -46,6 +46,12 @@ impl ZapExp {
     }
 }
 
+impl Default for ZapExp {
+    fn default() -> Self {
+        ZapExp::Nil
+    }
+}
+
 impl core::ops::Add for ZapExp {
     type Output = Self;
 
