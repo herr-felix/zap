@@ -65,7 +65,9 @@ impl Evaluator {
     fn push_let_form<E: Env>(&mut self, mut list: Vec<ZapExp>, env: &mut E) -> ZapResult {
         match list.len() {
             3 => {
-                if let (exp, ZapExp::List(mut bindings)) = (list.pop().unwrap(), list.pop().unwrap()) {
+                if let (exp, ZapExp::List(mut bindings)) =
+                    (list.pop().unwrap(), list.pop().unwrap())
+                {
                     if bindings.len() < 2 {
                         return Err(error("let must have at least one key and value to bind."));
                     }
@@ -78,12 +80,11 @@ impl Evaluator {
                     let first = swap_exp(&mut bindings, 0, ZapExp::Nil); // We know there is at least 2 in there.
                     self.stack.push(Form::Let(bindings, 0, exp));
                     Ok(first)
-                }
-                else {
+                } else {
                     Err(error("'let bindings should be a list.'"))
                 }
             }
-            _ => Err(error("'let' needs 2 expressions."))
+            _ => Err(error("'let' needs 2 expressions.")),
         }
     }
 
@@ -101,7 +102,7 @@ impl Evaluator {
                 }
             }
             x if x > 3 => Err(error("'define' only need a symbol and an expression")),
-            _ => Err(error("'define' needs a symbol and an expression"))
+            _ => Err(error("'define' needs a symbol and an expression")),
         }
     }
 
@@ -197,7 +198,7 @@ impl Evaluator {
                                     (ZapExp::Symbol(s), val) => {
                                         idx += 1;
                                         env.set(s, val);
-                                        if len  == idx {
+                                        if len == idx {
                                             self.stack.push(Form::Let(bindings, idx, ZapExp::Nil));
                                             tail
                                         } else {
@@ -206,7 +207,11 @@ impl Evaluator {
                                             continue;
                                         }
                                     }
-                                    (_, _) => return Err(error("let: Only symbols can be used for keys."))
+                                    (_, _) => {
+                                        return Err(error(
+                                            "let: Only symbols can be used for keys.",
+                                        ))
+                                    }
                                 }
                             };
                             break;
@@ -214,7 +219,7 @@ impl Evaluator {
                         Form::Define(symbol) => {
                             env.set(symbol, exp.clone());
                             exp
-                        },
+                        }
                         Form::Do(mut list, mut idx) => {
                             idx += 1;
                             if let Some(val) = list.get_mut(idx) {
