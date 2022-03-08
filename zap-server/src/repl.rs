@@ -3,11 +3,10 @@ use std::time::Instant;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use zap::env::Env;
+use zap::env::BasicEnv;
 use zap::eval::Evaluator;
 use zap::reader::Reader;
 use zap::types::ZapErr;
-use zap_core;
 
 pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
     let (mut input, mut output) = stream.into_split();
@@ -15,11 +14,11 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
     let mut buf = [0; 1024];
 
     let mut reader = Reader::new();
-    let mut env = Env::new();
+    let mut env = BasicEnv::default();
 
     zap_core::load(&mut env);
 
-    let mut evaluator = Evaluator::new();
+    let mut evaluator = Evaluator::default();
 
     loop {
         output.write("> ".as_bytes()).await?;
@@ -33,7 +32,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
                     continue;
                 }
                 Err(e) => {
-                    return Err(e.into());
+                    return Err(e);
                 }
             };
 

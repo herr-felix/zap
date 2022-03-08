@@ -6,7 +6,7 @@ fn plus(args: &[ZapExp]) -> ZapResult {
     let mut sum = 0.0;
     for v in args {
         if let ZapExp::Number(x) = v {
-            sum = sum + x;
+            sum += x;
         } else {
             return Err(error("+ can only add numbers."));
         }
@@ -15,7 +15,7 @@ fn plus(args: &[ZapExp]) -> ZapResult {
 }
 
 fn is_float(args: &[ZapExp]) -> ZapResult {
-    if args.len() == 0 {
+    if args.is_empty() {
         return Err(error("'float?' requires at least 1 argument."));
     }
     for v in args {
@@ -24,11 +24,11 @@ fn is_float(args: &[ZapExp]) -> ZapResult {
             _ => return Ok(ZapExp::Bool(false)),
         }
     }
-    return Ok(ZapExp::Bool(true));
+    Ok(ZapExp::Bool(true))
 }
 
 fn is_false(args: &[ZapExp]) -> ZapResult {
-    if args.len() == 0 {
+    if args.is_empty() {
         return Err(error("'false?' requires at least 1 argument."));
     }
     for v in args {
@@ -37,11 +37,11 @@ fn is_false(args: &[ZapExp]) -> ZapResult {
             _ => return Ok(ZapExp::Bool(false)),
         }
     }
-    return Ok(ZapExp::Bool(true));
+    Ok(ZapExp::Bool(true))
 }
 
 fn concat(args: &[ZapExp]) -> ZapResult {
-    if args.len() == 0 {
+    if args.is_empty() {
         return Err(error("'concat' requires at least 1 argument."));
     }
     let mut len = 0;
@@ -65,7 +65,7 @@ fn concat(args: &[ZapExp]) -> ZapResult {
     Ok(ZapExp::Str(result))
 }
 
-pub fn load(env: &mut Env) {
+pub fn load<E: Env>(env: &mut E) {
     env.reg_fn("+", plus);
     env.reg_fn("float?", is_float);
     env.reg_fn("false?", is_false);

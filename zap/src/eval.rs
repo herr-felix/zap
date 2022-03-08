@@ -1,30 +1,39 @@
 use crate::env::Env;
 use crate::types::{error, ZapExp, ZapResult};
 
-type ExpList = std::vec::IntoIter<ZapExp>;
+use std::mem;
 
 enum Form {
-    List(Vec<ZapExp>, ExpList),
+    List(Vec<ZapExp>, usize),
     If(ZapExp, ZapExp),
+    Do(Vec<ZapExp>, usize),
+    Define(String),
     Quote,
-    Let(ExpList, Option<String>, Option<ZapExp>),
+    Let(Vec<ZapExp>, usize, ZapExp),
 }
 
 pub struct Evaluator {
     stack: Vec<Form>,
 }
 
-impl Evaluator {
-    pub fn new() -> Evaluator {
+impl Default for Evaluator {
+    fn default() -> Self {
         Evaluator {
             stack: Vec::with_capacity(32),
         }
     }
+}
 
+#[inline(always)]
+fn swap_exp(list: &mut Vec<ZapExp>, idx: usize, exp: ZapExp) -> ZapExp {
+    mem::replace(list.get_mut(idx).unwrap(), exp)
+}
+
+impl Evaluator {
     #[inline(always)]
-    fn push_if_form(&mut self, mut rest: ExpList) -> ZapResult {
-        match (rest.next(), rest.next(), rest.next(), rest.next()) {
-            (Some(head), Some(then_branch), Some(else_branch), None) => {
+    fn push_if_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
+        match (list.pop(), list.pop(), list.pop(), list.pop(), list.pop()) {
+            (Some(else_branch), Some(then_branch), Some(head), Some(_), None) => {
                 self.stack.push(Form::If(then_branch, else_branch));
                 Ok(head)
             }
@@ -33,100 +42,128 @@ impl Evaluator {
     }
 
     #[inline(always)]
-    fn push_quote_form(&mut self, mut rest: ExpList) -> ZapResult {
-        match (rest.next(), rest.next()) {
-            (Some(exp), None) => {
+    fn push_quote_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
+        match list.len() {
+            2 => {
                 self.stack.push(Form::Quote);
+                let exp = swap_exp(&mut list, 1, ZapExp::Nil);
                 Ok(exp)
             }
-            (None, None) => Err(error("nothing to quote.")),
-            _ => Err(error("too many parameteres to quote")),
+            x if x > 2 => Err(error("too many parameteres to quote")),
+            _ => Err(error("nothing to quote.")),
         }
     }
 
     #[inline(always)]
-    fn push_list_form(&mut self, head: ZapExp, rest: ExpList, len: usize) -> ZapExp {
-        self.stack.push(Form::List(Vec::with_capacity(len), rest));
-        head
+    fn push_list_form(&mut self, mut list: Vec<ZapExp>) -> ZapExp {
+        let first = swap_exp(&mut list, 0, ZapExp::Nil);
+        self.stack.push(Form::List(list, 0));
+        first
     }
 
     #[inline(always)]
-    fn push_let_form(&mut self, mut rest: ExpList) -> ZapResult {
-        match (rest.next(), rest.next(), rest.next()) {
-            (Some(ZapExp::List(seq)), Some(exp), None) => {
-                if seq.len() < 2 {
-                    return Err(error("let must have at least one key and value to bind."));
+    fn push_let_form<E: Env>(&mut self, mut list: Vec<ZapExp>, env: &mut E) -> ZapResult {
+        match list.len() {
+            3 => {
+                if let (exp, ZapExp::List(mut bindings)) = (list.pop().unwrap(), list.pop().unwrap()) {
+                    if bindings.len() < 2 {
+                        return Err(error("let must have at least one key and value to bind."));
+                    }
+                    if bindings.len() % 2 == 1 {
+                        return Err(error(
+                            "let must have even number of keys and values to bind.",
+                        ));
+                    }
+                    env.push();
+                    let first = swap_exp(&mut bindings, 0, ZapExp::Nil); // We know there is at least 2 in there.
+                    self.stack.push(Form::Let(bindings, 0, exp));
+                    Ok(first)
                 }
-                if seq.len() % 2 == 1 {
-                    return Err(error(
-                        "let must have even number of keys and values to bind.",
-                    ));
+                else {
+                    Err(error("'let bindings should be a list.'"))
                 }
-                let mut bindings = seq.into_iter();
-                let first = bindings.next().unwrap(); // We know there is at least 2 in there.
-                self.stack.push(Form::Let(bindings, None, Some(exp)));
-                Ok(first)
             }
-            (Some(_), Some(_), None) => Err(error(
-                "let bindings must be a list containing an even number of keys and values to pair.",
-            )),
-            _ => Err(error("let can only contain 2 forms")),
+            _ => Err(error("'let' needs 2 expressions."))
         }
     }
 
-    pub async fn eval(&mut self, root: ZapExp, env: &mut Env) -> ZapResult {
+    #[inline(always)]
+    fn push_define_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
+        match list.len() {
+            3 => {
+                let exp = list.pop().unwrap();
+                match list.pop().unwrap() {
+                    ZapExp::Symbol(symbol) => {
+                        self.stack.push(Form::Define(symbol));
+                        Ok(exp)
+                    }
+                    _ => Err(error("'define' first form must be a symbol")),
+                }
+            }
+            x if x > 3 => Err(error("'define' only need a symbol and an expression")),
+            _ => Err(error("'define' needs a symbol and an expression"))
+        }
+    }
+
+    #[inline(always)]
+    fn push_do_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
+        if list.len() == 1 {
+            return Err(error("'do' forms needs at least one inner form"));
+        }
+        let first = swap_exp(&mut list, 1, ZapExp::Nil);
+        self.stack.push(Form::Do(list, 1));
+        Ok(first)
+    }
+
+    pub async fn eval<E: Env>(&mut self, root: ZapExp, env: &mut E) -> ZapResult {
         self.stack.truncate(0);
         let mut exp = root;
 
         loop {
             exp = match exp {
-                ZapExp::List(l) => {
-                    let len = l.len();
-                    let mut rest = l.into_iter();
-                    match rest.next() {
-                        Some(ZapExp::Symbol(s)) => match s.as_ref() {
-                            "if" => {
-                                exp = self.push_if_form(rest)?;
-                                continue;
-                            }
-                            "let" => {
-                                exp = self.push_let_form(rest)?;
-                                continue;
-                            }
-                            "quote" => self.push_quote_form(rest)?,
-                            _ => {
-                                exp = self.push_list_form(ZapExp::Symbol(s), rest, len);
-                                continue;
-                            }
-                        },
-                        Some(head) => {
-                            exp = self.push_list_form(head, rest, len);
+                ZapExp::List(list) => match list.first() {
+                    Some(ZapExp::Symbol(s)) => match s.as_ref() {
+                        "if" => {
+                            exp = self.push_if_form(list)?;
                             continue;
                         }
-                        None => ZapExp::List(Vec::new()),
+                        "let" => self.push_let_form(list, env)?,
+                        "do" => {
+                            exp = self.push_do_form(list)?;
+                            continue;
+                        }
+                        "define" => {
+                            exp = self.push_define_form(list)?;
+                            continue;
+                        }
+                        "quote" => self.push_quote_form(list)?,
+                        _ => {
+                            exp = self.push_list_form(list);
+                            continue;
+                        }
+                    },
+                    Some(_) => {
+                        exp = self.push_list_form(list);
+                        continue;
                     }
-                }
-                ZapExp::Symbol(s) => {
-                    if let Some(val) = env.get(&s) {
-                        val
-                    } else {
-                        return Err(error(format!("symbol '{}' not in scope.", s).as_str()));
-                    }
-                }
+                    None => ZapExp::List(list),
+                },
+                ZapExp::Symbol(s) => env.get(&s)?,
                 exp => exp,
             };
 
             loop {
                 if let Some(parent) = self.stack.pop() {
                     exp = match parent {
-                        Form::List(mut dst, mut rest) => {
-                            dst.push(exp);
-                            if let Some(val) = rest.next() {
-                                self.stack.push(Form::List(dst, rest));
-                                exp = val;
+                        Form::List(mut list, mut idx) => {
+                            swap_exp(&mut list, idx, exp);
+                            idx += 1;
+                            if let Some(val) = list.get_mut(idx) {
+                                exp = mem::replace(val, ZapExp::Nil);
+                                self.stack.push(Form::List(list, idx));
                                 break;
                             } else {
-                                ZapExp::apply(dst).await?
+                                ZapExp::apply(list).await?
                             }
                         }
                         Form::If(then_branch, else_branch) => {
@@ -137,43 +174,57 @@ impl Evaluator {
                             };
                             break;
                         }
-                        Form::Quote => exp,
-                        Form::Let(mut rest, key, tail) => {
-                            match (key, rest.next()) {
-                                (Some(key), Some(next_key)) => {
-                                    env.set(key, exp); // Set the key pair in the env
-                                    self.stack.push(Form::Let(rest, None, None));
-                                    exp = next_key
+                        Form::Let(mut bindings, mut idx, tail) => {
+                            let len = bindings.len();
+                            exp = if len == idx {
+                                // len == idx, we are popping down the stack
+                                env.pop();
+                                exp
+                            } else if idx % 2 == 0 {
+                                // idx is even, so exp is a key
+                                if let ZapExp::Symbol(s) = exp {
+                                    idx += 1;
+                                    exp = swap_exp(&mut bindings, idx, ZapExp::Symbol(s));
+                                    self.stack.push(Form::Let(bindings, idx, tail));
+                                    exp
+                                } else {
+                                    return Err(error("let: Only symbols can be used for keys."));
                                 }
-                                (None, Some(next_value)) => {
-                                    if let ZapExp::Symbol(s) = exp {
-                                        self.stack.push(Form::Let(rest, Some(s), None));
-                                        exp = next_value
-                                    } else {
-                                        return Err(error(
-                                            format!("let: Only symbols can be used for keys.")
-                                                .as_str(),
-                                        ));
+                            } else {
+                                // idx is odd, so exp is a value
+                                let key = swap_exp(&mut bindings, idx, ZapExp::Nil);
+                                match (key, exp) {
+                                    (ZapExp::Symbol(s), val) => {
+                                        idx += 1;
+                                        env.set(s, val);
+                                        if len  == idx {
+                                            self.stack.push(Form::Let(bindings, idx, ZapExp::Nil));
+                                            tail
+                                        } else {
+                                            exp = swap_exp(&mut bindings, idx, ZapExp::Nil);
+                                            self.stack.push(Form::Let(bindings, idx, tail));
+                                            continue;
+                                        }
                                     }
+                                    (_, _) => return Err(error("let: Only symbols can be used for keys."))
                                 }
-                                (Some(_), None) => {
-                                    return Err(error(
-                                        format!("let: Odd number of form in key value pair.")
-                                            .as_str(),
-                                    ))
-                                }
-                                (None, None) => {
-                                    if let Some(tail) = tail {
-                                        self.stack.push(Form::Let(rest, None, None));
-                                        exp = tail
-                                    } else {
-                                        // Pop the env scope
-                                        exp = exp
-                                    }
-                                }
-                            }
+                            };
                             break;
                         }
+                        Form::Define(symbol) => {
+                            env.set(symbol, exp.clone());
+                            exp
+                        },
+                        Form::Do(mut list, mut idx) => {
+                            idx += 1;
+                            if let Some(val) = list.get_mut(idx) {
+                                exp = mem::replace(val, ZapExp::Nil);
+                                self.stack.push(Form::Do(list, idx));
+                                break;
+                            }
+                            exp
+                        }
+                        Form::Quote => exp,
                     };
                 } else {
                     return Ok(exp);

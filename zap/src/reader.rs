@@ -22,12 +22,12 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Atom(s) => write!(f, "Atom({})", s),
-            Token::Quote => write!(f, "{}", "Quote"),
-            Token::Unquote => write!(f, "{}", "Unquote"),
-            Token::SpliceUnquote => write!(f, "{}", "SpliceUnquote"),
-            Token::Deref => write!(f, "{}", "Deref"),
-            Token::ListStart => write!(f, "{}", "ListStart"),
-            Token::ListEnd => write!(f, "{}", "ListEnd"),
+            Token::Quote => write!(f, "Quote"),
+            Token::Unquote => write!(f, "Unquote"),
+            Token::SpliceUnquote => write!(f, "SpliceUnquote"),
+            Token::Deref => write!(f, "Deref"),
+            Token::ListStart => write!(f, "ListStart"),
+            Token::ListEnd => write!(f, "ListEnd"),
         }
     }
 }
@@ -46,6 +46,12 @@ pub struct Reader {
     stack: Vec<ParentForm>,
 }
 
+impl Default for Reader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Reader {
     pub fn new() -> Reader {
         Reader {
@@ -58,6 +64,7 @@ impl Reader {
     fn tokenize_string(&mut self, chars: &mut Peekable<Chars>) {
         let mut escaped = self.token_buf.ends_with('\\');
 
+        #[allow(clippy::while_let_on_iterator)]
         while let Some(ch) = chars.next() {
             if escaped {
                 match ch {
@@ -86,7 +93,7 @@ impl Reader {
 
     #[inline(always)]
     fn flush_token(&mut self) {
-        if self.token_buf.len() > 0 {
+        if !self.token_buf.is_empty() {
             self.token_buf.shrink_to_fit();
             self.tokens.push_back(Token::Atom(self.token_buf.clone()));
             self.token_buf.truncate(0);
@@ -102,8 +109,8 @@ impl Reader {
             self.tokenize_string(&mut chars);
         }
         // If the last tokenize call ended in a comment
-        else if self.token_buf.starts_with(";") {
-            if chars.find(|&ch| ch == '\n').is_some() {
+        else if self.token_buf.starts_with(';') {
+            if chars.any(|ch| ch == '\n') {
                 self.token_buf.truncate(0);
             }
         } else if self.token_buf.starts_with('~') {
@@ -120,6 +127,7 @@ impl Reader {
             }
         }
 
+        #[allow(clippy::while_let_on_iterator)]
         while let Some(ch) = chars.next() {
             match ch {
                 ' ' | '\n' | '\t' | ',' => {
@@ -167,7 +175,7 @@ impl Reader {
                 ';' => {
                     self.flush_token();
                     self.token_buf.push(';');
-                    if chars.find(|&ch| ch == '\n').is_some() {
+                    if chars.any(|ch| ch == '\n') {
                         self.token_buf.truncate(0);
                     }
                 }
