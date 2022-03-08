@@ -28,12 +28,16 @@ impl Default for Evaluator {
 impl Evaluator {
     #[inline(always)]
     fn push_if_form(&mut self, mut list: Vec<ZapExp>) -> ZapResult {
-        match (list.pop(), list.pop(), list.pop(), list.pop(), list.pop()) {
-            (Some(else_branch), Some(then_branch), Some(head), Some(_), None) => {
-                self.stack.push(Form::If(then_branch, else_branch));
-                Ok(head)
-            }
-            _ => Err(error("an if form must contain 3 expressions.")),
+        if list.len() == 4 {
+            let (else_branch, then_branch, head) = (
+                list.pop().unwrap(),
+                list.pop().unwrap(),
+                list.pop().unwrap(),
+            );
+            self.stack.push(Form::If(then_branch, else_branch));
+            Ok(head)
+        } else {
+            Err(error("an if form must contain 3 expressions."))
         }
     }
 
@@ -230,12 +234,12 @@ impl Evaluator {
                         }
                         Form::Do(mut list, mut idx) => {
                             idx += 1;
-                            if let Some(val) = list.get_mut(idx) {
-                                exp = mem::replace(val, ZapExp::Nil);
+                            exp = mem::take(list.get_mut(idx).unwrap());
+                            if list.len() > (idx + 1) {
+                                // All but the last
                                 self.stack.push(Form::Do(list, idx));
-                                break;
                             }
-                            exp
+                            break;
                         }
                         Form::Quote => exp,
                     };
