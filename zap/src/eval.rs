@@ -154,81 +154,86 @@ impl Evaluator {
             };
 
             loop {
-                exp = match self.stack.pop() {
-                    Some(Form::List(mut list, mut idx)) => {
-                        swap_exp(&mut list, idx, exp);
-                        idx += 1;
-                        if let Some(val) = list.get_mut(idx) {
-                            exp = mem::replace(val, ZapExp::Nil);
-                            self.stack.push(Form::List(list, idx));
-                            break;
-                        } else {
-                            ZapExp::apply(list).await?
-                        }
-                    }
-                    Some(Form::If(then_branch, else_branch)) => {
-                        exp = if exp.is_truish() {
-                            then_branch
-                        } else {
-                            else_branch
-                        };
-                        break;
-                    }
-                    Some(Form::Let(mut bindings, mut idx, tail)) => {
-                        let len = bindings.len();
-                        exp = if len == idx {
-                            // len == idx, we are popping down the stack
-                            env.pop();
-                            exp
-                        } else if idx % 2 == 0 {
-                            // idx is even, so exp is a key
-                            if matches!(exp, ZapExp::Symbol(_)) {
-                                idx += 1;
-                                exp = swap_exp(&mut bindings, idx, exp);
-                                self.stack.push(Form::Let(bindings, idx, tail));
-                                exp
+                if let Some(parent) = self.stack.pop() {
+                    exp = match parent {
+                        Form::List(mut list, mut idx) => {
+                            swap_exp(&mut list, idx, exp);
+                            idx += 1;
+                            if let Some(val) = list.get_mut(idx) {
+                                exp = mem::replace(val, ZapExp::Nil);
+                                self.stack.push(Form::List(list, idx));
+                                break;
                             } else {
-                                return Err(error("let: Only symbols can be used for keys."));
+                                ZapExp::apply(list).await?
                             }
-                        } else {
-                            // idx is odd, so exp is a value
-                            let key = swap_exp(&mut bindings, idx, ZapExp::Nil);
-                            match (key, exp) {
-                                (ZapExp::Symbol(s), val) => {
+                        }
+                        Form::If(then_branch, else_branch) => {
+                            exp = if exp.is_truish() {
+                                then_branch
+                            } else {
+                                else_branch
+                            };
+                            break;
+                        }
+                        Form::Let(mut bindings, mut idx, tail) => {
+                            let len = bindings.len();
+                            exp = if len == idx {
+                                // len == idx, we are popping down the stack
+                                env.pop();
+                                exp
+                            } else if idx % 2 == 0 {
+                                // idx is even, so exp is a key
+                                if matches!(exp, ZapExp::Symbol(_)) {
                                     idx += 1;
-                                    env.set(s, val);
-                                    if len == idx {
-                                        self.stack.push(Form::Let(bindings, idx, ZapExp::Nil));
-                                        tail
-                                    } else {
-                                        exp = swap_exp(&mut bindings, idx, ZapExp::Nil);
-                                        self.stack.push(Form::Let(bindings, idx, tail));
-                                        continue;
+                                    exp = swap_exp(&mut bindings, idx, exp);
+                                    self.stack.push(Form::Let(bindings, idx, tail));
+                                    exp
+                                } else {
+                                    return Err(error("let: Only symbols can be used for keys."));
+                                }
+                            } else {
+                                // idx is odd, so exp is a value
+                                let key = swap_exp(&mut bindings, idx, ZapExp::Nil);
+                                match (key, exp) {
+                                    (ZapExp::Symbol(s), val) => {
+                                        idx += 1;
+                                        env.set(s, val);
+                                        if len == idx {
+                                            self.stack.push(Form::Let(bindings, idx, ZapExp::Nil));
+                                            tail
+                                        } else {
+                                            exp = swap_exp(&mut bindings, idx, ZapExp::Nil);
+                                            self.stack.push(Form::Let(bindings, idx, tail));
+                                            continue;
+                                        }
+                                    }
+                                    (_, _) => {
+                                        return Err(error(
+                                            "let: Only symbols can be used for keys.",
+                                        ))
                                     }
                                 }
-                                (_, _) => {
-                                    return Err(error("let: Only symbols can be used for keys."))
-                                }
-                            }
-                        };
-                        break;
-                    }
-                    Some(Form::Define(symbol)) => {
-                        env.set(symbol, exp.clone());
-                        exp
-                    }
-                    Some(Form::Do(mut list, mut idx)) => {
-                        idx += 1;
-                        if let Some(val) = list.get_mut(idx) {
-                            exp = mem::replace(val, ZapExp::Nil);
-                            self.stack.push(Form::Do(list, idx));
+                            };
                             break;
                         }
-                        exp
-                    }
-                    Some(Form::Quote) => exp,
-                    None => return Ok(exp),
-                };
+                        Form::Define(symbol) => {
+                            env.set(symbol, exp.clone());
+                            exp
+                        }
+                        Form::Do(mut list, mut idx) => {
+                            idx += 1;
+                            if let Some(val) = list.get_mut(idx) {
+                                exp = mem::replace(val, ZapExp::Nil);
+                                self.stack.push(Form::Do(list, idx));
+                                break;
+                            }
+                            exp
+                        }
+                        Form::Quote => exp,
+                    };
+                } else {
+                    return Ok(exp);
+                }
             }
         }
     }

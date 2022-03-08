@@ -1,4 +1,3 @@
-
 pub type ZapFnRef = fn(&[ZapExp]) -> ZapResult;
 
 #[derive(Clone)]
@@ -9,14 +8,13 @@ pub struct ZapFn {
 
 impl ZapFn {
     pub fn new(name: String, func: ZapFnRef) -> Box<Self> {
-        Box::new(ZapFn{name, func})
+        Box::new(ZapFn { name, func })
     }
 
     pub fn name(&self) -> String {
         self.name.clone()
     }
 }
-
 
 #[derive(Clone)]
 pub enum ZapExp {

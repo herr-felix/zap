@@ -49,7 +49,9 @@ impl Env for BasicEnv {
     }
 
     fn reg_fn(&mut self, symbol: &str, f: ZapFnRef) {
-        self.scope
-            .insert(symbol.to_string(), ZapExp::Func(ZapFn::new(symbol.to_string(), f)));
+        self.scope.insert(
+            symbol.to_string(),
+            ZapExp::Func(ZapFn::new(symbol.to_string(), f)),
+        );
     }
 }
