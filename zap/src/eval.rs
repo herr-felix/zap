@@ -50,26 +50,25 @@ impl Evaluator {
 
     #[inline(always)]
     fn push_let_form<E: Env>(&mut self, list: ZapList, env: &mut E) -> ZapResult {
-        match list.len() {
-            3 => {
-                if let ZapExp::List(bindings) = &list[1] {
-                    if bindings.len() < 2 {
-                        return Err(error("let must have at least one key and value to bind."));
-                    }
-                    if bindings.len() % 2 == 1 {
-                        return Err(error(
-                            "let must have even number of keys and values to bind.",
-                        ));
-                    }
-                    env.push();
-                    self.path
-                        .push(Form::Let(bindings.clone(), 0, list[2].clone()));
-                    Ok(bindings[0].clone())
-                } else {
-                    Err(error("'let bindings should be a list.'"))
+        if list.len() == 3 {
+            if let ZapExp::List(bindings) = &list[1] {
+                if bindings.len() < 2 {
+                    return Err(error("let must have at least one key and value to bind."));
                 }
+                if bindings.len() % 2 == 1 {
+                    return Err(error(
+                        "let must have even number of keys and values to bind.",
+                    ));
+                }
+                env.push();
+                self.path
+                    .push(Form::Let(bindings.clone(), 0, list[2].clone()));
+                Ok(bindings[0].clone())
+            } else {
+                Err(error("'let bindings should be a list.'"))
             }
-            _ => Err(error("'let' needs 2 expressions.")),
+        } else {
+            Err(error("'let' needs 2 expressions."))
         }
     }
 
