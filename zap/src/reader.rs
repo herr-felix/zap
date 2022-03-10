@@ -4,7 +4,6 @@ use std::collections::VecDeque;
 use std::iter::Peekable;
 use std::num::ParseFloatError;
 use std::str::Chars;
-use std::sync::Arc;
 
 use crate::types::{error, ZapErr, ZapExp};
 
@@ -252,7 +251,7 @@ impl Reader {
                     continue;
                 }
                 Token::ListEnd => match self.stack.pop() {
-                    Some(ParentForm::List(seq)) => ZapExp::List(Arc::new(seq)),
+                    Some(ParentForm::List(seq)) => ZapExp::List(ZapExp::new_list(seq)),
                     Some(ParentForm::Quote) => return Err(self.read_error("Cannot quote a ')'")),
                     Some(ParentForm::Unquote) => {
                         return Err(self.read_error("Cannot unquote a ')'"))

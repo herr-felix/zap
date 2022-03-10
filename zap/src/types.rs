@@ -31,6 +31,10 @@ pub enum ZapExp {
 }
 
 impl ZapExp {
+    pub fn new_list(list: Vec<ZapExp>) -> ZapList {
+        Arc::new(list)
+    }
+
     pub fn is_truish(&self) -> bool {
         !matches!(*self, ZapExp::Nil | ZapExp::Bool(false))
     }

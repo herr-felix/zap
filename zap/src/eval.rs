@@ -29,11 +29,8 @@ impl Evaluator {
     #[inline(always)]
     fn push_if_form(&mut self, list: ZapList) -> ZapResult {
         if list.len() == 4 {
-            self.path.push(Form::If(
-                list.get(2).cloned().unwrap(),
-                list.get(3).cloned().unwrap(),
-            ));
-            Ok(list.get(1).cloned().unwrap())
+            self.path.push(Form::If(list[2].clone(), list[3].clone()));
+            Ok(list[1].clone())
         } else {
             Err(error("an if form must contain 3 expressions."))
         }
@@ -44,7 +41,7 @@ impl Evaluator {
         match list.len() {
             2 => {
                 self.path.push(Form::Quote);
-                Ok(list.get(1).cloned().unwrap())
+                Ok(list[1].clone())
             }
             x if x > 2 => Err(error("too many parameteres to quote")),
             _ => Err(error("nothing to quote.")),
@@ -52,16 +49,10 @@ impl Evaluator {
     }
 
     #[inline(always)]
-    fn push_list_form(&mut self, list: ZapList) -> ZapExp {
-        self.path.push(Form::List(list.clone(), 0));
-        list.get(0).cloned().unwrap()
-    }
-
-    #[inline(always)]
     fn push_let_form<E: Env>(&mut self, list: ZapList, env: &mut E) -> ZapResult {
         match list.len() {
             3 => {
-                if let ZapExp::List(bindings) = list.get(1).cloned().unwrap() {
+                if let ZapExp::List(bindings) = &list[1] {
                     if bindings.len() < 2 {
                         return Err(error("let must have at least one key and value to bind."));
                     }
@@ -71,10 +62,9 @@ impl Evaluator {
                         ));
                     }
                     env.push();
-                    let first = bindings.get(0).cloned().unwrap(); // We know there is at least 2 in there.
                     self.path
-                        .push(Form::Let(bindings, 0, list.get(2).cloned().unwrap()));
-                    Ok(first)
+                        .push(Form::Let(bindings.clone(), 0, list[2].clone()));
+                    Ok(bindings[0].clone())
                 } else {
                     Err(error("'let bindings should be a list.'"))
                 }
@@ -86,10 +76,10 @@ impl Evaluator {
     #[inline(always)]
     fn push_define_form(&mut self, list: ZapList) -> ZapResult {
         match list.len() {
-            3 => match list.get(1).unwrap() {
+            3 => match &list[1] {
                 ZapExp::Symbol(symbol) => {
                     self.path.push(Form::Define(symbol.clone()));
-                    Ok(list.get(2).cloned().unwrap())
+                    Ok(list[2].clone())
                 }
                 _ => Err(error("'define' first form must be a symbol")),
             },
@@ -103,8 +93,9 @@ impl Evaluator {
         if list.len() == 1 {
             return Err(error("'do' forms needs at least one inner form"));
         }
-        self.path.push(Form::Do(list.clone(), 1));
-        Ok(list.get(1).cloned().unwrap())
+        let first = list[1].clone();
+        self.path.push(Form::Do(list, 1));
+        Ok(first)
     }
 
     pub async fn eval<E: Env>(&mut self, root: ZapExp, env: &mut E) -> ZapResult {
@@ -133,12 +124,14 @@ impl Evaluator {
                                 }
                                 "quote" => self.push_quote_form(list)?,
                                 _ => {
-                                    exp = self.push_list_form(list);
-                                    continue;
+                                    exp = env.get(s)?;
+                                    self.path.push(Form::List(list, 0));
+                                    exp
                                 }
                             },
                             _ => {
-                                exp = self.push_list_form(list);
+                                exp = list[0].clone();
+                                self.path.push(Form::List(list, 0));
                                 continue;
                             }
                         }
@@ -146,7 +139,7 @@ impl Evaluator {
                         ZapExp::List(list)
                     }
                 }
-                ZapExp::Symbol(_) => env.get(&exp)?,
+                ZapExp::Symbol(s) => env.get(&s)?,
                 atom => atom,
             };
 
@@ -157,12 +150,12 @@ impl Evaluator {
                             self.stack.push(exp);
 
                             idx += 1;
-                            if let Some(next) = list.get(idx).cloned() {
-                                exp = next;
+                            if list.len() > idx {
+                                exp = list[idx].clone();
                                 self.path.push(Form::List(list, idx));
                                 break;
                             } else {
-                                let args = &self.stack.as_slice()[self.stack.len() - list.len()..];
+                                let args = &self.stack[self.stack.len() - list.len()..];
                                 ZapExp::apply(args).await?
                             }
                         }
@@ -186,7 +179,7 @@ impl Evaluator {
                                     ZapExp::Symbol(_) => {
                                         self.stack.push(exp);
                                         idx += 1;
-                                        exp = bindings.get(idx).cloned().unwrap();
+                                        exp = bindings[idx].clone();
                                         self.path.push(Form::Let(bindings, idx, tail));
                                         exp
                                     }
@@ -204,10 +197,10 @@ impl Evaluator {
                                         idx += 1;
                                         env.set(s, val);
                                         if len == idx {
-                                            self.path.push(Form::Let(bindings, idx, tail.clone()));
+                                            self.path.push(Form::Let(bindings, idx, ZapExp::Nil));
                                             tail
                                         } else {
-                                            exp = bindings.get(idx).cloned().unwrap();
+                                            exp = bindings[idx].clone();
                                             self.path.push(Form::Let(bindings, idx, tail));
                                             continue;
                                         }
@@ -227,7 +220,7 @@ impl Evaluator {
                         }
                         Form::Do(list, mut idx) => {
                             idx += 1;
-                            exp = list.get(idx).cloned().unwrap();
+                            exp = list[idx].clone();
                             if list.len() > (idx + 1) {
                                 // All but the last
                                 self.path.push(Form::Do(list, idx));
