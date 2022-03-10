@@ -1,4 +1,5 @@
 use smartstring::alias::String;
+use std::sync::Arc;
 
 pub type ZapFnRef = fn(&[ZapExp]) -> ZapResult;
 
@@ -25,7 +26,7 @@ pub enum ZapExp {
     Symbol(String),
     Number(f64),
     Str(String),
-    List(Vec<ZapExp>),
+    List(ZapList),
     Func(Box<ZapFn>),
 }
 
@@ -35,7 +36,7 @@ impl ZapExp {
     }
 
     #[inline(always)]
-    pub async fn apply(list: Vec<ZapExp>) -> ZapResult {
+    pub async fn apply(list: &[ZapExp]) -> ZapResult {
         if let Some((first, args)) = list.split_first() {
             return match first {
                 ZapExp::Func(f) => ((*f).func)(args),
@@ -73,3 +74,4 @@ pub fn error(msg: &str) -> ZapErr {
 }
 
 pub type ZapResult = Result<ZapExp, ZapErr>;
+pub type ZapList = Arc<Vec<ZapExp>>;
