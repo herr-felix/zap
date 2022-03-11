@@ -2,7 +2,7 @@ use fnv::FnvHashMap;
 use smartstring::alias::String;
 use std::mem;
 
-use crate::types::{error, ZapExp, ZapFn, ZapFnRef, ZapResult};
+use crate::types::{error, ZapErr, ZapExp, ZapFn, ZapFnNative, ZapResult};
 
 type Scope = FnvHashMap<String, ZapExp>;
 
@@ -10,8 +10,8 @@ pub trait Env {
     fn push(&mut self);
     fn pop(&mut self);
     fn get(&self, symbol: &String) -> ZapResult;
-    fn set(&mut self, key: String, val: ZapExp);
-    fn reg_fn(&mut self, symbol: &str, f: ZapFnRef);
+    fn set(&mut self, key: &ZapExp, val: ZapExp) -> Result<(), ZapErr>;
+    fn reg_fn(&mut self, symbol: &str, f: ZapFnNative);
 }
 
 #[derive(Default)]
@@ -42,17 +42,23 @@ impl Env for BasicEnv {
             .ok_or_else(|| error(format!("symbol '{}' not in scope.", key).as_str()))
     }
 
-    fn set(&mut self, key: String, val: ZapExp) {
-        if let Some(prev) = self.scope.insert(key.clone(), val) {
-            // We put the previous value in shadow, if there was any.
-            self.shadow.entry(key).or_insert(prev);
+    fn set(&mut self, key: &ZapExp, val: ZapExp) -> Result<(), ZapErr> {
+        if let ZapExp::Symbol(s) = key {
+            if let Some(prev) = self.scope.insert(s.clone(), val) {
+                // We put the previous value in shadow, if there was any.
+                self.shadow.entry(s.clone()).or_insert(prev);
+            }
+            Ok(())
+        }
+        else {
+            Err(error("Env set: only symbols can be used as keys."))
         }
     }
 
-    fn reg_fn(&mut self, symbol: &str, f: ZapFnRef) {
+    fn reg_fn(&mut self, symbol: &str, f: ZapFnNative) {
         self.scope.insert(
             String::from(symbol),
-            ZapExp::Func(ZapFn::new(String::from(symbol), f)),
+            ZapExp::Func(ZapFn::native(String::from(symbol), f)),
         );
     }
 }

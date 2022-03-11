@@ -65,9 +65,22 @@ fn concat(args: &[ZapExp]) -> ZapResult {
     Ok(ZapExp::Str(result.into()))
 }
 
+fn equal(args: &[ZapExp]) -> ZapResult {
+    if args.len() != 2 {
+        return Err(error("'=' requires at 2 argument."));
+    }
+
+    let a = &args[0];
+    let b = &args[1];
+
+    Ok(ZapExp::Bool(a == b))
+}
+
+
 pub fn load<E: Env>(env: &mut E) {
     env.reg_fn("+", plus);
     env.reg_fn("float?", is_float);
     env.reg_fn("false?", is_false);
     env.reg_fn("concat", concat);
+    env.reg_fn("=", equal);
 }

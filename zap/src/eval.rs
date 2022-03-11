@@ -1,14 +1,30 @@
 use crate::env::Env;
-use crate::types::{error, ZapExp, ZapList, ZapResult};
-use smartstring::alias::String;
+use crate::types::{error, ZapExp, ZapFn, ZapList, ZapResult};
 
 enum Form {
     List(ZapList, usize),
     If(ZapExp, ZapExp),
     Do(ZapList, usize),
-    Define(String),
+    Define(ZapExp),
     Quote,
     Let(ZapList, usize, ZapExp),
+    Call,
+    Return,
+}
+
+impl std::fmt::Debug for Form {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Form::List(l, s) => write!(f, "List({:?}, {})", l, s),
+            Form::If(a, b) => write!(f, "If({:?}, {:?})", a, b),
+            Form::Do(_, _) => write!(f, "Do"),
+            Form::Define(_) => write!(f, "Define"),
+            Form::Quote => write!(f, "Quote"),
+            Form::Let(_, _, _) => write!(f, "Let"),
+            Form::Call => write!(f, "Call"),
+            Form::Return => write!(f, "Return"),
+        }
+    }
 }
 
 pub struct Evaluator {
@@ -76,8 +92,8 @@ impl Evaluator {
     fn push_define_form(&mut self, list: ZapList) -> ZapResult {
         match list.len() {
             3 => match &list[1] {
-                ZapExp::Symbol(symbol) => {
-                    self.path.push(Form::Define(symbol.clone()));
+                ZapExp::Symbol(_) => {
+                    self.path.push(Form::Define(list[1].clone()));
                     Ok(list[2].clone())
                 }
                 _ => Err(error("'define' first form must be a symbol")),
@@ -95,6 +111,61 @@ impl Evaluator {
         let first = list[1].clone();
         self.path.push(Form::Do(list, 1));
         Ok(first)
+    }
+
+    #[inline(always)]
+    fn register_fn(&mut self, list: ZapList) -> ZapResult {
+        if list.len() != 3 {
+            return Err(error("'fn' needs 2 forms: the parameters and a body."));
+        }
+
+        if let ZapExp::List(args) = &list[1] {
+            if args.iter().any(|arg| { !matches!(arg, ZapExp::Symbol(_)) }) {
+                return Err(error("'fn': only symbols can be used as function arguments."))
+            }
+
+            Ok(ZapExp::Func(ZapFn::new(args.clone(), list[2].clone())))
+        }
+        else {
+            Err(error("'fn' first form should be a list of symbols."))
+        }
+    }
+
+    #[inline(always)]
+    pub async fn apply<E: Env>(&mut self, argc: usize, env: &mut E) -> ZapResult {
+        let params = &self.stack[self.stack.len() - argc..];
+        if let Some((first, params)) = params.split_first() {
+            let exp = match first {
+                ZapExp::Func(f) => match &**f {
+                    ZapFn::Native(_, f) => f(params),
+                    ZapFn::Func{args, ast} => {
+
+                        if !matches!(self.path.last(), Some(Form::Return)) {
+                            env.push();
+                            self.path.push(Form::Return);
+                        }
+
+                        self.path.push(Form::Call);
+
+                        for i in 0..args.len() {
+                            env.set(&args[i], params[i].clone())?;
+                        }
+                        
+                        Ok(ast.clone())
+                    }
+                }
+                _ => {
+//                    println!("{:?}", self.path);
+                    Err(error("Only functions can be called."))
+                },
+            };
+            // Clear the args from the stack
+            self.stack.truncate(self.stack.len() - argc);
+            exp
+        } 
+        else {
+            Err(error("Cannot evaluate a empty list."))
+        }
     }
 
     pub async fn eval<E: Env>(&mut self, root: ZapExp, env: &mut E) -> ZapResult {
@@ -122,6 +193,7 @@ impl Evaluator {
                                     continue;
                                 }
                                 "quote" => self.push_quote_form(list)?,
+                                "fn" => self.register_fn(list)?,
                                 _ => {
                                     exp = env.get(s)?;
                                     self.path.push(Form::List(list, 0));
@@ -143,6 +215,8 @@ impl Evaluator {
             };
 
             loop {
+                //println!("{:?}", self.path);
+                //println!("{:?}", self.stack);
                 if let Some(parent) = self.path.pop() {
                     exp = match parent {
                         Form::List(list, mut idx) => {
@@ -154,8 +228,7 @@ impl Evaluator {
                                 self.path.push(Form::List(list, idx));
                                 break;
                             } else {
-                                let args = &self.stack[self.stack.len() - list.len()..];
-                                ZapExp::apply(args).await?
+                                self.apply(list.len(), env).await?
                             }
                         }
                         Form::If(then_branch, else_branch) => {
@@ -191,10 +264,10 @@ impl Evaluator {
                             } else {
                                 // idx is odd, so exp is a value
                                 let key = self.stack.pop().unwrap();
-                                match (key, exp) {
-                                    (ZapExp::Symbol(s), val) => {
+                                match &key {
+                                    ZapExp::Symbol(_) => {
                                         idx += 1;
-                                        env.set(s, val);
+                                        env.set(&key, exp)?;
                                         if len == idx {
                                             self.path.push(Form::Let(bindings, idx, ZapExp::Nil));
                                             tail
@@ -204,7 +277,7 @@ impl Evaluator {
                                             continue;
                                         }
                                     }
-                                    (_, _) => {
+                                    _ => {
                                         return Err(error(
                                             "let: Only symbols can be used for keys.",
                                         ))
@@ -214,7 +287,7 @@ impl Evaluator {
                             break;
                         }
                         Form::Define(symbol) => {
-                            env.set(symbol, exp.clone());
+                            env.set(&symbol, exp.clone())?;
                             exp
                         }
                         Form::Do(list, mut idx) => {
@@ -226,6 +299,13 @@ impl Evaluator {
                             }
                             break;
                         }
+                        Form::Call => {
+                            break;
+                        },
+                        Form::Return => {
+                            env.pop();
+                            exp
+                        },
                         Form::Quote => exp,
                     };
                 } else {

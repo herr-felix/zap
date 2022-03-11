@@ -1,25 +1,53 @@
 use smartstring::alias::String;
 use std::sync::Arc;
 
-pub type ZapFnRef = fn(&[ZapExp]) -> ZapResult;
+pub type ZapFnNative = fn(&[ZapExp]) -> ZapResult;
 
 #[derive(Clone)]
-pub struct ZapFn {
-    name: String,
-    func: ZapFnRef,
+pub enum ZapFn {
+    Native(String, ZapFnNative),
+    Func{args: ZapList, ast: ZapExp}
 }
 
 impl ZapFn {
-    pub fn new(name: String, func: ZapFnRef) -> Box<Self> {
-        Box::new(ZapFn { name, func })
+    pub fn native(name: String, func: ZapFnNative) -> Arc<Self> {
+        Arc::new(ZapFn::Native(name, func))
     }
 
-    pub fn name(&self) -> String {
-        self.name.clone()
+    pub fn new(args: ZapList, ast: ZapExp) -> Arc<Self> {
+        Arc::new(ZapFn::Func{args, ast})
     }
 }
 
-#[derive(Clone)]
+impl PartialEq for ZapFn {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ZapFn::Native(a, _), ZapFn::Native(b, _)) => {
+                a == b
+            },
+            (ZapFn::Func{args: args_a, ast: ast_a}, ZapFn::Func{args: args_b, ast: ast_b}) => {
+                args_a == args_b && ast_a == ast_b
+            }
+            (_, _) => false
+        }
+    }
+}
+
+impl std::fmt::Debug for ZapFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ZapFn::Native(name, _) => {
+                write!(f, "Native func<{}>", name)
+            },
+            ZapFn::Func{args, ast: _} => {
+                write!(f, "Func <{}>", args.len())
+            }
+        }
+    }
+}
+
+
+#[derive(Clone, PartialEq, Debug)]
 pub enum ZapExp {
     Nil,
     Bool(bool),
@@ -27,7 +55,7 @@ pub enum ZapExp {
     Number(f64),
     Str(String),
     List(ZapList),
-    Func(Box<ZapFn>),
+    Func(Arc<ZapFn>),
 }
 
 impl ZapExp {
@@ -39,16 +67,6 @@ impl ZapExp {
         !matches!(*self, ZapExp::Nil | ZapExp::Bool(false))
     }
 
-    #[inline(always)]
-    pub async fn apply(list: &[ZapExp]) -> ZapResult {
-        if let Some((first, args)) = list.split_first() {
-            return match first {
-                ZapExp::Func(f) => ((*f).func)(args),
-                _ => Err(error("Only functions can be called.")),
-            };
-        }
-        Err(error("Cannot evaluate a empty list."))
-    }
 }
 
 impl Default for ZapExp {

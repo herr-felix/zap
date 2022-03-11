@@ -1,4 +1,5 @@
 # Head dump:
+
 - HQ: Head quarter, is the main loop in the Zap runtime. 
 It's looping on an MPSC channel, updating the root environement, recording user change, forking environement, etc.
 
@@ -11,3 +12,8 @@ allowing the runtime to restart where it was, or to reset the environement to
 a certain mutation.
 
 - Async partout?
+
+- Interning all strings used for symbols. Using usize for symbol.
+
+- Functions: Differenciate between native functions and regular functions.
+Arguments are stored as a slice of strings.

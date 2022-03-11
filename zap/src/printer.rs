@@ -17,7 +17,7 @@ impl ZapExp {
             ZapExp::Symbol(s) => s.clone().to_string(),
             ZapExp::Str(s) => format!("\"{}\"", escape_str(s.clone())), // TODO: Escape string
             ZapExp::List(l) => pr_seq(l, "(", ")"),
-            ZapExp::Func(f) => format!("<Func {}>", (*f).name()),
+            ZapExp::Func(f) => format!("{:?}", f),
         }
     }
 }
