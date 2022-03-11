@@ -3,9 +3,9 @@ use crate::types::{error, ZapExp, ZapFn, ZapList, ZapResult};
 
 enum Form {
     List(ZapList, usize),
-    If(ZapExp, ZapExp),
+    If,
     Do(ZapList, usize),
-    Define(ZapExp),
+    Define,
     Quote,
     Let(ZapList, usize, ZapExp),
     Call(usize),
@@ -16,9 +16,9 @@ impl std::fmt::Debug for Form {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Form::List(l, s) => write!(f, "List({:?}, {})", l, s),
-            Form::If(a, b) => write!(f, "If({:?}, {:?})", a, b),
+            Form::If => write!(f, "If"),
             Form::Do(_, _) => write!(f, "Do"),
-            Form::Define(_) => write!(f, "Define"),
+            Form::Define => write!(f, "Define"),
             Form::Quote => write!(f, "Quote"),
             Form::Let(_, _, _) => write!(f, "Let"),
             Form::Call(n) => write!(f, "Call({})", n),
@@ -50,7 +50,9 @@ impl Evaluator {
     #[inline(always)]
     fn push_if_form(&mut self, list: ZapList) -> ZapResult {
         if list.len() == 4 {
-            self.path.push(Form::If(list[2].clone(), list[3].clone()));
+            self.path.push(Form::If);
+            self.stack.push(list[3].clone());
+            self.stack.push(list[2].clone());
             Ok(list[1].clone())
         } else {
             Err(error("an if form must contain 3 expressions."))
@@ -103,7 +105,8 @@ impl Evaluator {
         match list.len() {
             3 => match &list[1] {
                 ZapExp::Symbol(_) => {
-                    self.path.push(Form::Define(list[1].clone()));
+                    self.stack.push(list[1].clone());
+                    self.path.push(Form::Define);
                     Ok(list[2].clone())
                 }
                 _ => Err(error("'define' first form must be a symbol")),
@@ -190,9 +193,9 @@ impl Evaluator {
 
             loop {
                 #[cfg(debug_assertions)]
-                dbg!(&self.path);
+                println!("{:?}", self.path);
                 #[cfg(debug_assertions)]
-                dbg!(&self.stack);
+                println!("{:?}", self.stack);
                 if let Some(parent) = self.path.pop() {
                     exp = match parent {
                         Form::List(list, mut idx) => {
@@ -208,12 +211,13 @@ impl Evaluator {
                                 ZapExp::Nil
                             }
                         }
-                        Form::If(then_branch, else_branch) => {
-                            exp = if exp.is_truish() {
-                                then_branch
+                        Form::If => {
+                            if exp.is_truish() {
+                                self.stack.swap_remove(self.stack.len() - 2);
                             } else {
-                                else_branch
+                                self.stack.pop();
                             };
+                            exp = self.stack.pop().unwrap();
                             break;
                         }
                         Form::Let(bindings, mut idx, tail) => {
@@ -265,7 +269,8 @@ impl Evaluator {
                             };
                             break;
                         }
-                        Form::Define(symbol) => {
+                        Form::Define => {
+                            let symbol = self.stack.pop().unwrap();
                             env.set_global(&symbol, &exp)?;
                             exp
                         }
