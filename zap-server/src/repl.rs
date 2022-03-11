@@ -3,7 +3,7 @@ use std::time::Instant;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use zap::env::BasicEnv;
+use zap::env::SandboxEnv;
 use zap::eval::Evaluator;
 use zap::reader::Reader;
 use zap::types::ZapErr;
@@ -14,7 +14,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
     let mut buf = [0; 1024];
 
     let mut reader = Reader::new();
-    let mut env = BasicEnv::default();
+    let mut env = SandboxEnv::default();
 
     zap_core::load(&mut env);
 

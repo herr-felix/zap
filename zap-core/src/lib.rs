@@ -76,7 +76,6 @@ fn equal(args: &[ZapExp]) -> ZapResult {
     Ok(ZapExp::Bool(a == b))
 }
 
-
 pub fn load<E: Env>(env: &mut E) {
     env.reg_fn("+", plus);
     env.reg_fn("float?", is_float);

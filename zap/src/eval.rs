@@ -8,7 +8,7 @@ enum Form {
     Define(ZapExp),
     Quote,
     Let(ZapList, usize, ZapExp),
-    Call,
+    Call(usize),
     Return,
 }
 
@@ -21,7 +21,7 @@ impl std::fmt::Debug for Form {
             Form::Define(_) => write!(f, "Define"),
             Form::Quote => write!(f, "Quote"),
             Form::Let(_, _, _) => write!(f, "Let"),
-            Form::Call => write!(f, "Call"),
+            Form::Call(n) => write!(f, "Call({})", n),
             Form::Return => write!(f, "Return"),
         }
     }
@@ -42,6 +42,11 @@ impl Default for Evaluator {
 }
 
 impl Evaluator {
+    #[inline(always)]
+    fn is_in_tail(&self) -> bool {
+        matches!(self.path.last(), Some(Form::Return))
+    }
+
     #[inline(always)]
     fn push_if_form(&mut self, list: ZapList) -> ZapResult {
         if list.len() == 4 {
@@ -76,7 +81,12 @@ impl Evaluator {
                         "let must have even number of keys and values to bind.",
                     ));
                 }
-                env.push();
+
+                if !self.is_in_tail() {
+                    // TCO
+                    env.push();
+                }
+
                 self.path
                     .push(Form::Let(bindings.clone(), 0, list[2].clone()));
                 Ok(bindings[0].clone())
@@ -120,51 +130,15 @@ impl Evaluator {
         }
 
         if let ZapExp::List(args) = &list[1] {
-            if args.iter().any(|arg| { !matches!(arg, ZapExp::Symbol(_)) }) {
-                return Err(error("'fn': only symbols can be used as function arguments."))
+            if args.iter().any(|arg| !matches!(arg, ZapExp::Symbol(_))) {
+                return Err(error(
+                    "'fn': only symbols can be used as function arguments.",
+                ));
             }
 
             Ok(ZapExp::Func(ZapFn::new(args.clone(), list[2].clone())))
-        }
-        else {
+        } else {
             Err(error("'fn' first form should be a list of symbols."))
-        }
-    }
-
-    #[inline(always)]
-    pub async fn apply<E: Env>(&mut self, argc: usize, env: &mut E) -> ZapResult {
-        let params = &self.stack[self.stack.len() - argc..];
-        if let Some((first, params)) = params.split_first() {
-            let exp = match first {
-                ZapExp::Func(f) => match &**f {
-                    ZapFn::Native(_, f) => f(params),
-                    ZapFn::Func{args, ast} => {
-
-                        if !matches!(self.path.last(), Some(Form::Return)) {
-                            env.push();
-                            self.path.push(Form::Return);
-                        }
-
-                        self.path.push(Form::Call);
-
-                        for i in 0..args.len() {
-                            env.set(&args[i], params[i].clone())?;
-                        }
-                        
-                        Ok(ast.clone())
-                    }
-                }
-                _ => {
-//                    println!("{:?}", self.path);
-                    Err(error("Only functions can be called."))
-                },
-            };
-            // Clear the args from the stack
-            self.stack.truncate(self.stack.len() - argc);
-            exp
-        } 
-        else {
-            Err(error("Cannot evaluate a empty list."))
         }
     }
 
@@ -215,8 +189,10 @@ impl Evaluator {
             };
 
             loop {
-                //println!("{:?}", self.path);
-                //println!("{:?}", self.stack);
+                #[cfg(debug_assertions)]
+                dbg!(&self.path);
+                #[cfg(debug_assertions)]
+                dbg!(&self.stack);
                 if let Some(parent) = self.path.pop() {
                     exp = match parent {
                         Form::List(list, mut idx) => {
@@ -228,7 +204,8 @@ impl Evaluator {
                                 self.path.push(Form::List(list, idx));
                                 break;
                             } else {
-                                self.apply(list.len(), env).await?
+                                self.path.push(Form::Call(list.len()));
+                                ZapExp::Nil
                             }
                         }
                         Form::If(then_branch, else_branch) => {
@@ -243,7 +220,9 @@ impl Evaluator {
                             let len = bindings.len();
                             exp = if len <= idx {
                                 // len == idx, we are popping down the path
-                                env.pop();
+                                if !self.is_in_tail() {
+                                    env.pop();
+                                }
                                 exp
                             } else if idx % 2 == 0 {
                                 // idx is even, so exp is a key
@@ -267,7 +246,7 @@ impl Evaluator {
                                 match &key {
                                     ZapExp::Symbol(_) => {
                                         idx += 1;
-                                        env.set(&key, exp)?;
+                                        env.set(&key, &exp)?;
                                         if len == idx {
                                             self.path.push(Form::Let(bindings, idx, ZapExp::Nil));
                                             tail
@@ -287,7 +266,7 @@ impl Evaluator {
                             break;
                         }
                         Form::Define(symbol) => {
-                            env.set(&symbol, exp.clone())?;
+                            env.set_global(&symbol, &exp)?;
                             exp
                         }
                         Form::Do(list, mut idx) => {
@@ -299,13 +278,40 @@ impl Evaluator {
                             }
                             break;
                         }
-                        Form::Call => {
+                        Form::Call(argc) => {
+                            let (fn_val, params) =
+                                &self.stack[self.stack.len() - argc..].split_first().unwrap();
+
+                            exp = match fn_val {
+                                ZapExp::Func(f) => match &**f {
+                                    ZapFn::Native(_, f) => f(params)?,
+                                    ZapFn::Func { args, ast } => {
+                                        if !self.is_in_tail() {
+                                            // TCO
+                                            env.push();
+                                            self.path.push(Form::Return);
+                                        }
+
+                                        for i in 0..args.len() {
+                                            env.set(&args[i], &params[i])?;
+                                        }
+
+                                        ast.clone()
+                                    }
+                                },
+                                _ => {
+                                    //                    println!("{:?}", self.path);
+                                    return Err(error("Only functions can be called."));
+                                }
+                            };
+                            // Clear the args from the stack
+                            self.stack.truncate(self.stack.len() - argc);
                             break;
-                        },
+                        }
                         Form::Return => {
                             env.pop();
                             exp
-                        },
+                        }
                         Form::Quote => exp,
                     };
                 } else {

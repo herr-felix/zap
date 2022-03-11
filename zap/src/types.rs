@@ -6,7 +6,7 @@ pub type ZapFnNative = fn(&[ZapExp]) -> ZapResult;
 #[derive(Clone)]
 pub enum ZapFn {
     Native(String, ZapFnNative),
-    Func{args: ZapList, ast: ZapExp}
+    Func { args: ZapList, ast: ZapExp },
 }
 
 impl ZapFn {
@@ -15,20 +15,25 @@ impl ZapFn {
     }
 
     pub fn new(args: ZapList, ast: ZapExp) -> Arc<Self> {
-        Arc::new(ZapFn::Func{args, ast})
+        Arc::new(ZapFn::Func { args, ast })
     }
 }
 
 impl PartialEq for ZapFn {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (ZapFn::Native(a, _), ZapFn::Native(b, _)) => {
-                a == b
-            },
-            (ZapFn::Func{args: args_a, ast: ast_a}, ZapFn::Func{args: args_b, ast: ast_b}) => {
-                args_a == args_b && ast_a == ast_b
-            }
-            (_, _) => false
+            (ZapFn::Native(a, _), ZapFn::Native(b, _)) => a == b,
+            (
+                ZapFn::Func {
+                    args: args_a,
+                    ast: ast_a,
+                },
+                ZapFn::Func {
+                    args: args_b,
+                    ast: ast_b,
+                },
+            ) => args_a == args_b && ast_a == ast_b,
+            (_, _) => false,
         }
     }
 }
@@ -38,14 +43,13 @@ impl std::fmt::Debug for ZapFn {
         match self {
             ZapFn::Native(name, _) => {
                 write!(f, "Native func<{}>", name)
-            },
-            ZapFn::Func{args, ast: _} => {
+            }
+            ZapFn::Func { args, ast: _ } => {
                 write!(f, "Func <{}>", args.len())
             }
         }
     }
 }
-
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ZapExp {
@@ -66,7 +70,6 @@ impl ZapExp {
     pub fn is_truish(&self) -> bool {
         !matches!(*self, ZapExp::Nil | ZapExp::Bool(false))
     }
-
 }
 
 impl Default for ZapExp {

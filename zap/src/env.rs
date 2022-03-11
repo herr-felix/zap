@@ -1,6 +1,5 @@
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use smartstring::alias::String;
-use std::mem;
 
 use crate::types::{error, ZapErr, ZapExp, ZapFn, ZapFnNative, ZapResult};
 
@@ -10,27 +9,51 @@ pub trait Env {
     fn push(&mut self);
     fn pop(&mut self);
     fn get(&self, symbol: &String) -> ZapResult;
-    fn set(&mut self, key: &ZapExp, val: ZapExp) -> Result<(), ZapErr>;
+    fn set(&mut self, key: &ZapExp, val: &ZapExp) -> Result<(), ZapErr>;
+    fn set_global(&mut self, key: &ZapExp, val: &ZapExp) -> Result<(), ZapErr>;
     fn reg_fn(&mut self, symbol: &str, f: ZapFnNative);
 }
 
 #[derive(Default)]
-pub struct BasicEnv {
+pub struct SandboxEnv {
     scope: Scope,
-    shadow: Scope,
+    locals: FnvHashSet<String>,
     stack: Vec<Scope>,
 }
 
-impl Env for BasicEnv {
+impl Env for SandboxEnv {
+    #[inline(always)]
     fn push(&mut self) {
-        self.stack.push(mem::take(&mut self.shadow));
+        let mut shadow = Scope::with_capacity_and_hasher(self.locals.len(), Default::default());
+
+        for k in self.locals.drain() {
+            let v = self.scope.get(&k).unwrap().clone();
+            shadow.insert(k, v);
+        }
+
+        self.stack.push(shadow);
     }
 
+    #[inline(always)]
     fn pop(&mut self) {
-        self.scope.extend(self.shadow.drain());
+        if let Some(mut shadow) = self.stack.pop() {
+            for k in self.locals.clone().drain() {
+                if let Some(v) = shadow.remove(&k) {
+                    self.scope.insert(k, v);
+                } else {
+                    self.locals.remove(&k);
+                    self.scope.remove(&k);
+                }
+            }
 
-        if let Some(new_shadow) = self.stack.pop() {
-            self.shadow = new_shadow;
+            for (k, v) in shadow.drain() {
+                self.locals.insert(k.clone());
+                self.scope.insert(k, v);
+            }
+        } else {
+            for k in self.locals.drain() {
+                self.scope.remove(&k);
+            }
         }
     }
 
@@ -42,15 +65,26 @@ impl Env for BasicEnv {
             .ok_or_else(|| error(format!("symbol '{}' not in scope.", key).as_str()))
     }
 
-    fn set(&mut self, key: &ZapExp, val: ZapExp) -> Result<(), ZapErr> {
+    #[inline(always)]
+    fn set(&mut self, key: &ZapExp, val: &ZapExp) -> Result<(), ZapErr> {
         if let ZapExp::Symbol(s) = key {
-            if let Some(prev) = self.scope.insert(s.clone(), val) {
-                // We put the previous value in shadow, if there was any.
-                self.shadow.entry(s.clone()).or_insert(prev);
+            if self.locals.contains(s) {
+                self.locals.insert(s.clone());
             }
+
+            self.scope.insert(s.clone(), val.clone());
+
             Ok(())
+        } else {
+            Err(error("Env set: only symbols can be used as keys."))
         }
-        else {
+    }
+
+    fn set_global(&mut self, key: &ZapExp, val: &ZapExp) -> Result<(), ZapErr> {
+        if let ZapExp::Symbol(s) = key {
+            self.scope.insert(s.clone(), val.clone());
+            Ok(())
+        } else {
             Err(error("Env set: only symbols can be used as keys."))
         }
     }

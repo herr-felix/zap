@@ -11,7 +11,7 @@ use crate::repl::start_repl;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("0.0.0.0:2020").await.unwrap();
 
