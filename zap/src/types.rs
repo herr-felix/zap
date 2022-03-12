@@ -10,12 +10,12 @@ pub enum ZapFn {
 }
 
 impl ZapFn {
-    pub fn native(name: String, func: ZapFnNative) -> Arc<Self> {
-        Arc::new(ZapFn::Native(name, func))
+    pub fn native(name: String, func: ZapFnNative) -> ZapExp {
+        ZapExp::Func(Arc::new(ZapFn::Native(name, func)))
     }
 
-    pub fn new(args: ZapList, ast: ZapExp) -> Arc<Self> {
-        Arc::new(ZapFn::Func { args, ast })
+    pub fn new_fn(args: ZapList, ast: ZapExp) -> ZapExp {
+        ZapExp::Func(Arc::new(ZapFn::Func { args, ast }))
     }
 }
 

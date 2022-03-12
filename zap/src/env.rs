@@ -90,9 +90,7 @@ impl Env for SandboxEnv {
     }
 
     fn reg_fn(&mut self, symbol: &str, f: ZapFnNative) {
-        self.scope.insert(
-            String::from(symbol),
-            ZapExp::Func(ZapFn::native(String::from(symbol), f)),
-        );
+        self.scope
+            .insert(String::from(symbol), ZapFn::native(String::from(symbol), f));
     }
 }

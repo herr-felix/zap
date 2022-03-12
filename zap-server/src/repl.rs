@@ -18,7 +18,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
 
     zap_core::load(&mut env);
 
-    let mut evaluator = Evaluator::default();
+    let mut evaluator = Evaluator::new(env);
 
     loop {
         output.write("> ".as_bytes()).await?;
@@ -42,18 +42,15 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
             loop {
                 match reader.read_form() {
                     Ok(Some(form)) => {
-                        output
-                            .write(format!("Reader: {}\n", form.pr_str()).as_bytes())
-                            .await?;
                         let start = Instant::now();
-                        match evaluator.eval(form, &mut env).await {
+                        match evaluator.eval(form) {
                             Ok(result) => {
                                 let end = Instant::now();
                                 output
-                                    .write(format!("Evaluated in {:?}\n", end - start).as_bytes())
+                                    .write(format!("{}\n", result.pr_str()).as_bytes())
                                     .await?;
                                 output
-                                    .write(format!("{}\n", result.pr_str()).as_bytes())
+                                    .write(format!("Evaluated in {:?}\n", end - start).as_bytes())
                                     .await?;
                             }
                             Err(ZapErr::Msg(err)) => {
