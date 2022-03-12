@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::task;
 
 use zap::env::SandboxEnv;
 use zap::eval::Evaluator;
@@ -18,7 +19,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
 
     zap_core::load(&mut env);
 
-    let mut evaluator = Evaluator::new(env);
+    let mut session = Evaluator::new(env);
 
     loop {
         output.write("> ".as_bytes()).await?;
@@ -42,10 +43,13 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
             loop {
                 match reader.read_form() {
                     Ok(Some(form)) => {
+                        let evaluator = &mut session;
                         let start = Instant::now();
-                        match evaluator.eval(form) {
+                        let evaluated = task::block_in_place(move || evaluator.eval(form));
+                        let end = Instant::now();
+
+                        match evaluated {
                             Ok(result) => {
-                                let end = Instant::now();
                                 output
                                     .write(format!("{}\n", result.pr_str()).as_bytes())
                                     .await?;

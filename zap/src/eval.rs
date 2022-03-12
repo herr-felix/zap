@@ -268,11 +268,11 @@ impl<E: Env> Evaluator<E> {
                             break;
                         }
                         Form::Call(argc) => {
-                            let items = &self.stack[self.stack.len() - argc..];
+                            let params = &self.stack[self.stack.len() - argc..];
 
-                            let exp = match &items[0] {
+                            let exp = match &params[0] {
                                 ZapExp::Func(f) => match &**f {
-                                    ZapFn::Native(_, f) => f(&items[1..])?,
+                                    ZapFn::Native(_, f) => f(&params[1..])?,
                                     ZapFn::Func { args, ast } => {
                                         if !self.is_in_tail() {
                                             // TCO
@@ -281,7 +281,7 @@ impl<E: Env> Evaluator<E> {
                                         }
 
                                         for i in 0..args.len() {
-                                            self.env.set(&args[i], &items[i + 1])?;
+                                            self.env.set(&args[i], &params[i + 1])?;
                                         }
 
                                         ast.clone()

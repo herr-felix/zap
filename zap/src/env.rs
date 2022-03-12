@@ -68,7 +68,7 @@ impl Env for SandboxEnv {
     #[inline(always)]
     fn set(&mut self, key: &ZapExp, val: &ZapExp) -> Result<(), ZapErr> {
         if let ZapExp::Symbol(s) = key {
-            if self.locals.contains(s) {
+            if !self.locals.contains(s) {
                 self.locals.insert(s.clone());
             }
 
