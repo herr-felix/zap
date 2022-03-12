@@ -1,6 +1,11 @@
 use smartstring::alias::String;
 use std::sync::Arc;
 
+pub type Symbol = usize;
+
+pub type ZapResult = Result<ZapExp, ZapErr>;
+pub type ZapList = Arc<Vec<ZapExp>>;
+
 pub type ZapFnNative = fn(&[ZapExp]) -> ZapResult;
 
 #[derive(Clone)]
@@ -55,7 +60,7 @@ impl std::fmt::Debug for ZapFn {
 pub enum ZapExp {
     Nil,
     Bool(bool),
-    Symbol(String),
+    Symbol(Symbol),
     Number(f64),
     Str(String),
     List(ZapList),
@@ -97,6 +102,3 @@ pub enum ZapErr {
 pub fn error(msg: &str) -> ZapErr {
     ZapErr::Msg(msg.to_string())
 }
-
-pub type ZapResult = Result<ZapExp, ZapErr>;
-pub type ZapList = Arc<Vec<ZapExp>>;

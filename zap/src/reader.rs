@@ -5,6 +5,7 @@ use std::iter::Peekable;
 use std::num::ParseFloatError;
 use std::str::Chars;
 
+use crate::env::Env;
 use crate::types::{error, ZapErr, ZapExp};
 
 /* Tokenizer */
@@ -193,7 +194,7 @@ impl Reader {
         }
     }
 
-    fn read_atom(mut atom: std::string::String) -> ZapExp {
+    fn read_atom<E: Env>(mut atom: std::string::String, env: &mut E) -> ZapExp {
         match atom.as_ref() {
             "nil" => ZapExp::Nil,
             "true" => ZapExp::Bool(true),
@@ -206,7 +207,7 @@ impl Reader {
                 let potential_float: Result<f64, ParseFloatError> = atom.parse();
                 match potential_float {
                     Ok(v) => ZapExp::Number(v),
-                    Err(_) => ZapExp::Symbol(String::from(atom)),
+                    Err(_) => env.reg_symbol(String::from(atom)),
                 }
             }
         }
@@ -218,18 +219,15 @@ impl Reader {
     }
 
     #[inline(always)]
-    fn expand_reader_macro(&mut self, expanded: &str, exp: ZapExp) {
+    fn expand_reader_macro(&mut self, form: ZapExp, exp: ZapExp) {
         self.tokens.push_front(Token::ListEnd);
-        self.stack.push(ParentForm::List(vec![
-            ZapExp::Symbol(String::from(expanded)),
-            exp,
-        ]));
+        self.stack.push(ParentForm::List(vec![form, exp]));
     }
 
-    pub fn read_form(&mut self) -> Result<Option<ZapExp>, ZapErr> {
+    pub fn read_form<E: Env>(&mut self, env: &mut E) -> Result<Option<ZapExp>, ZapErr> {
         while let Some(token) = self.tokens.pop_front() {
             let exp = match token {
-                Token::Atom(s) => Reader::read_atom(s),
+                Token::Atom(s) => Reader::read_atom(s, env),
                 Token::Quote => {
                     self.stack.push(ParentForm::Quote);
                     continue;
@@ -269,10 +267,18 @@ impl Reader {
                     parent.push(exp);
                     self.stack.push(ParentForm::List(parent));
                 }
-                Some(ParentForm::Quote) => self.expand_reader_macro("quote", exp),
-                Some(ParentForm::Unquote) => self.expand_reader_macro("unquote", exp),
-                Some(ParentForm::SpliceUnquote) => self.expand_reader_macro("splice-unquote", exp),
-                Some(ParentForm::Deref) => self.expand_reader_macro("deref", exp),
+                Some(ParentForm::Quote) => {
+                    self.expand_reader_macro(env.reg_symbol(String::from("quote")), exp)
+                }
+                Some(ParentForm::Unquote) => {
+                    self.expand_reader_macro(env.reg_symbol(String::from("unquote")), exp)
+                }
+                Some(ParentForm::SpliceUnquote) => {
+                    self.expand_reader_macro(env.reg_symbol(String::from("splice-unquote")), exp)
+                }
+                Some(ParentForm::Deref) => {
+                    self.expand_reader_macro(env.reg_symbol(String::from("deref")), exp)
+                }
                 None => return Ok(Some(exp)),
             }
         }

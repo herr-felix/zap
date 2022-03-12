@@ -14,8 +14,8 @@ impl ZapExp {
             ZapExp::Bool(true) => std::string::String::from("true"),
             ZapExp::Bool(false) => std::string::String::from("false"),
             ZapExp::Number(f) => format!("{}", f),
-            ZapExp::Symbol(s) => s.clone().to_string(),
-            ZapExp::Str(s) => format!("\"{}\"", escape_str(s.clone())), // TODO: Escape string
+            ZapExp::Symbol(s) => s.to_string(), // TODO: Find string for symbol in env
+            ZapExp::Str(s) => format!("\"{}\"", escape_str(s.clone())),
             ZapExp::List(l) => pr_seq(l, "(", ")"),
             ZapExp::Func(f) => format!("{:?}", f),
         }

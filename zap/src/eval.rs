@@ -1,3 +1,4 @@
+use crate::env::symbols::{self};
 use crate::env::Env;
 use crate::types::{error, ZapErr, ZapExp, ZapFn, ZapList, ZapResult};
 
@@ -40,6 +41,10 @@ impl<E: Env> Evaluator<E> {
             stack: Vec::with_capacity(32),
             env,
         }
+    }
+
+    pub fn get_env(&mut self) -> &mut E {
+        &mut self.env
     }
 
     #[inline(always)]
@@ -139,8 +144,8 @@ impl<E: Env> Evaluator<E> {
                 ZapExp::List(list) => {
                     if list.len() > 0 {
                         match list[0] {
-                            ZapExp::Symbol(ref s) => match s.as_ref() {
-                                "if" => {
+                            ZapExp::Symbol(id) => {
+                                if id == symbols::IF {
                                     if list.len() != 4 {
                                         return Err(error(
                                             "an if form must contain 3 expressions.",
@@ -151,9 +156,9 @@ impl<E: Env> Evaluator<E> {
                                     self.stack.push(list[1].clone());
                                     self.path.push(Form::If);
                                     continue;
-                                }
-                                "let" => self.push_let_form(list)?,
-                                "do" => {
+                                } else if id == symbols::LET {
+                                    self.push_let_form(list)?
+                                } else if id == symbols::DO {
                                     if list.len() == 1 {
                                         return Err(error(
                                             "'do' forms needs at least one inner form",
@@ -162,18 +167,18 @@ impl<E: Env> Evaluator<E> {
                                     self.stack.push(list[1].clone());
                                     self.path.push(Form::Do(list, 1));
                                     continue;
-                                }
-                                "define" => {
+                                } else if id == symbols::DEFINE {
                                     self.push_define_form(list)?;
                                     continue;
-                                }
-                                "quote" => self.push_quote_form(list)?,
-                                "fn" => self.register_fn(list)?,
-                                _ => {
-                                    self.stack.push(self.env.get(s)?);
+                                } else if id == symbols::QUOTE {
+                                    self.push_quote_form(list)?
+                                } else if id == symbols::FN {
+                                    self.register_fn(list)?
+                                } else {
+                                    self.stack.push(self.env.get(id)?);
                                     self.path.push(Form::List(list, 0));
                                 }
-                            },
+                            }
                             _ => {
                                 self.stack.push(list[0].clone());
                                 self.path.push(Form::List(list, 0));
@@ -183,7 +188,7 @@ impl<E: Env> Evaluator<E> {
                         self.stack.push(ZapExp::List(list));
                     }
                 }
-                ZapExp::Symbol(s) => self.stack.push(self.env.get(&s)?),
+                ZapExp::Symbol(s) => self.stack.push(self.env.get(s)?),
                 atom => self.stack.push(atom),
             };
 

@@ -41,7 +41,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
             reader.tokenize(src);
 
             loop {
-                match reader.read_form() {
+                match reader.read_form(session.get_env()) {
                     Ok(Some(form)) => {
                         let evaluator = &mut session;
                         let start = Instant::now();
