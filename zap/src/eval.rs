@@ -169,7 +169,7 @@ impl<E: Env> Evaluator<E> {
                                 } else if id == symbols::FN {
                                     top = self.register_fn(list)?
                                 } else {
-                                    top = self.env.get(id)?;
+                                    top = self.env.get(&id)?;
                                     self.path.push(Form::List(list, 0));
                                 }
                             }
@@ -183,7 +183,7 @@ impl<E: Env> Evaluator<E> {
                     }
                 }
                 ZapExp::Symbol(s) => {
-                    top = self.env.get(s)?;
+                    top = self.env.get(&s)?;
                 }
                 atom => {
                     top = atom;

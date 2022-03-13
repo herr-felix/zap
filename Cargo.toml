@@ -3,12 +3,14 @@ members = [
     "zap",
     "zap-core",
     "zap-server",
+    "zap-for-profiling",
 ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [profile.release]
-lto = true
-strip = true
-codegen-units = 1
+#lto = true
+#strip = true
+debug=true
+#codegen-units = 1
 panic = "abort"

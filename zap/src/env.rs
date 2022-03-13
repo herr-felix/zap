@@ -1,10 +1,10 @@
-use fnv::{FnvHashMap, FnvHashSet};
+use fxhash::{FxHashMap, FxHashSet};
 use smartstring::alias::String;
 
 use crate::types::{error, Symbol, ZapErr, ZapExp, ZapFn, ZapFnNative, ZapResult};
 
-type Scope = FnvHashMap<Symbol, ZapExp>;
-type SymbolTable = FnvHashMap<String, Symbol>;
+type Scope = FxHashMap<Symbol, ZapExp>;
+type SymbolTable = FxHashMap<String, Symbol>;
 
 // TODO: Make sures all the default symbols (for special forms) are here.
 // TODO: Make a macro that generate const Symbol for each default symbols.
@@ -23,7 +23,7 @@ pub mod symbols {
 pub trait Env {
     fn push(&mut self);
     fn pop(&mut self);
-    fn get(&self, symbol: Symbol) -> ZapResult;
+    fn get(&self, symbol: &Symbol) -> ZapResult;
     fn set(&mut self, key: &ZapExp, val: &ZapExp) -> Result<(), ZapErr>;
     fn set_global(&mut self, key: &ZapExp, val: &ZapExp) -> Result<(), ZapErr>;
     fn reg_symbol(&mut self, s: String) -> ZapExp;
@@ -33,7 +33,7 @@ pub trait Env {
 
 pub struct SandboxEnv {
     scope: Scope,
-    locals: FnvHashSet<Symbol>,
+    locals: FxHashSet<Symbol>,
     stack: Vec<Scope>,
     symbols: SymbolTable,
 }
@@ -42,7 +42,7 @@ impl Default for SandboxEnv {
     fn default() -> Self {
         let mut this = SandboxEnv {
             scope: Scope::default(),
-            locals: FnvHashSet::<Symbol>::default(),
+            locals: FxHashSet::<Symbol>::default(),
             stack: Vec::<Scope>::default(),
             symbols: SymbolTable::default(),
         };
@@ -92,13 +92,14 @@ impl Env for SandboxEnv {
     }
 
     #[inline(always)]
-    fn get(&self, key: Symbol) -> ZapResult {
-        self.scope
-            .get(&key)
+    fn get(&self, key: &Symbol) -> ZapResult {
+        self.scope.get(key)
             .cloned()
-            .ok_or_else(|| match self.get_symbol(&key) {
-                Ok(s) => error(format!("symbol '{}' not in scope.", s).as_str()),
-                Err(err) => err,
+            .ok_or_else(|| {
+                match self.get_symbol(key) {
+                    Ok(s) => error(format!("symbol '{}' not in scope.", s).as_str()),
+                    Err(err) => err,
+                }
             })
     }
 
