@@ -1,5 +1,5 @@
-use crate::types::ZapExp;
 use crate::env::Env;
+use crate::types::ZapExp;
 use smartstring::alias::String;
 
 fn escape_str(s: String) -> std::string::String {
@@ -15,7 +15,7 @@ impl ZapExp {
             ZapExp::Bool(true) => std::string::String::from("true"),
             ZapExp::Bool(false) => std::string::String::from("false"),
             ZapExp::Number(f) => format!("{}", f),
-            ZapExp::Symbol(s) => env.get_symbol(&s).unwrap().to_string(),
+            ZapExp::Symbol(s) => env.get_symbol(*s).unwrap().to_string(),
             ZapExp::Str(s) => format!("\"{}\"", escape_str(s.clone())),
             ZapExp::List(l) => pr_seq(l, "(", ")", env),
             ZapExp::Func(f) => format!("{:?}", f),

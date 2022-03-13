@@ -3,7 +3,6 @@ use zap::eval::Evaluator;
 use zap::reader::Reader;
 
 fn main() {
-
     let mut reader = Reader::new();
     let mut env = SandboxEnv::default();
 

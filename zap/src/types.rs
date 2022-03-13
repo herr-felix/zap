@@ -11,7 +11,7 @@ pub type ZapFnNative = fn(&[ZapExp]) -> ZapResult;
 #[derive(Clone)]
 pub enum ZapFn {
     Native(String, ZapFnNative),
-    Func { args: ZapList, ast: ZapExp },
+    Func { args: Vec<Symbol>, ast: ZapExp },
 }
 
 impl ZapFn {
@@ -19,7 +19,7 @@ impl ZapFn {
         ZapExp::Func(Arc::new(ZapFn::Native(name, func)))
     }
 
-    pub fn new_fn(args: ZapList, ast: ZapExp) -> ZapExp {
+    pub fn new_fn(args: Vec<Symbol>, ast: ZapExp) -> ZapExp {
         ZapExp::Func(Arc::new(ZapFn::Func { args, ast }))
     }
 }
