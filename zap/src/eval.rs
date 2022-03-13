@@ -1,10 +1,10 @@
 use crate::env::symbols::{self};
 use crate::env::Env;
-use crate::types::{error, ZapErr, ZapExp, ZapFn, ZapList, ZapResult};
+use crate::types::{error, ZapExp, ZapFn, ZapList, ZapResult};
 
 enum Form {
     List(ZapList, usize),
-    If,
+    If(ZapList),
     Do(ZapList, usize),
     Define,
     Quote,
@@ -17,7 +17,7 @@ impl std::fmt::Debug for Form {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Form::List(l, s) => write!(f, "List({:?}, {})", l, s),
-            Form::If => write!(f, "If"),
+            Form::If(_) => write!(f, "If"),
             Form::Do(_, _) => write!(f, "Do"),
             Form::Define => write!(f, "Define"),
             Form::Quote => write!(f, "Quote"),
@@ -53,12 +53,11 @@ impl<E: Env> Evaluator<E> {
     }
 
     #[inline(always)]
-    fn push_quote_form(&mut self, list: ZapList) -> Result<(), ZapErr> {
+    fn push_quote_form(&mut self, list: ZapList) -> ZapResult {
         match list.len() {
             2 => {
                 self.path.push(Form::Quote);
-                self.stack.push(list[1].clone());
-                Ok(())
+                Ok(list[1].clone())
             }
             x if x > 2 => Err(error("too many parameteres to quote")),
             _ => Err(error("nothing to quote.")),
@@ -66,7 +65,7 @@ impl<E: Env> Evaluator<E> {
     }
 
     #[inline(always)]
-    fn push_let_form(&mut self, list: ZapList) -> Result<(), ZapErr> {
+    fn push_let_form(&mut self, list: ZapList) -> ZapResult {
         if list.len() == 3 {
             if let ZapExp::List(bindings) = &list[1] {
                 if bindings.len() < 2 {
@@ -86,8 +85,8 @@ impl<E: Env> Evaluator<E> {
                 self.path.push(Form::Let(bindings.clone(), 0));
 
                 self.stack.push(list[2].clone());
-                self.stack.push(bindings[0].clone());
-                Ok(())
+
+                Ok(bindings[0].clone())
             } else {
                 Err(error("'let bindings should be a list.'"))
             }
@@ -97,14 +96,13 @@ impl<E: Env> Evaluator<E> {
     }
 
     #[inline(always)]
-    fn push_define_form(&mut self, list: ZapList) -> Result<(), ZapErr> {
+    fn push_define_form(&mut self, list: ZapList) -> ZapResult {
         match list.len() {
             3 => match &list[1] {
                 ZapExp::Symbol(_) => {
                     self.path.push(Form::Define);
                     self.stack.push(list[1].clone());
-                    self.stack.push(list[2].clone());
-                    Ok(())
+                    Ok(list[2].clone())
                 }
                 _ => Err(error("'define' first form must be a symbol")),
             },
@@ -114,7 +112,7 @@ impl<E: Env> Evaluator<E> {
     }
 
     #[inline(always)]
-    fn register_fn(&mut self, list: ZapList) -> Result<(), ZapErr> {
+    fn register_fn(&mut self, list: ZapList) -> ZapResult {
         if list.len() != 3 {
             return Err(error("'fn' needs 2 forms: the parameters and a body."));
         }
@@ -125,9 +123,7 @@ impl<E: Env> Evaluator<E> {
                     "'fn': only symbols can be used as function arguments.",
                 ));
             }
-            self.stack
-                .push(ZapFn::new_fn(args.clone(), list[2].clone()));
-            Ok(())
+            Ok(ZapFn::new_fn(args.clone(), list[2].clone()))
         } else {
             Err(error("'fn' first form should be a list of symbols."))
         }
@@ -137,10 +133,10 @@ impl<E: Env> Evaluator<E> {
         self.path.clear();
         self.stack.clear();
 
-        self.stack.push(root);
+        let mut top = root;
 
         loop {
-            match self.stack.pop().unwrap() {
+            match top {
                 ZapExp::List(list) => {
                     if list.len() > 0 {
                         match list[0] {
@@ -151,45 +147,47 @@ impl<E: Env> Evaluator<E> {
                                             "an if form must contain 3 expressions.",
                                         ));
                                     }
-                                    self.stack.push(list[3].clone());
-                                    self.stack.push(list[2].clone());
-                                    self.stack.push(list[1].clone());
-                                    self.path.push(Form::If);
+                                    top = list[1].clone();
+                                    self.path.push(Form::If(list));
                                     continue;
                                 } else if id == symbols::LET {
-                                    self.push_let_form(list)?
+                                    top = self.push_let_form(list)?
                                 } else if id == symbols::DO {
                                     if list.len() == 1 {
                                         return Err(error(
                                             "'do' forms needs at least one inner form",
                                         ));
                                     }
-                                    self.stack.push(list[1].clone());
+                                    top = list[1].clone();
                                     self.path.push(Form::Do(list, 1));
                                     continue;
                                 } else if id == symbols::DEFINE {
-                                    self.push_define_form(list)?;
+                                    top = self.push_define_form(list)?;
                                     continue;
                                 } else if id == symbols::QUOTE {
-                                    self.push_quote_form(list)?
+                                    top = self.push_quote_form(list)?
                                 } else if id == symbols::FN {
-                                    self.register_fn(list)?
+                                    top = self.register_fn(list)?
                                 } else {
-                                    self.stack.push(self.env.get(id)?);
+                                    top = self.env.get(id)?;
                                     self.path.push(Form::List(list, 0));
                                 }
                             }
                             _ => {
-                                self.stack.push(list[0].clone());
+                                top = list[0].clone();
                                 self.path.push(Form::List(list, 0));
                             }
                         }
                     } else {
-                        self.stack.push(ZapExp::List(list));
+                        top = ZapExp::List(list);
                     }
                 }
-                ZapExp::Symbol(s) => self.stack.push(self.env.get(s)?),
-                atom => self.stack.push(atom),
+                ZapExp::Symbol(s) => {
+                    top = self.env.get(s)?;
+                }
+                atom => {
+                    top = atom;
+                }
             };
 
             loop {
@@ -201,20 +199,22 @@ impl<E: Env> Evaluator<E> {
                 if let Some(parent) = self.path.pop() {
                     match parent {
                         Form::List(list, mut idx) => {
+                            self.stack.push(top);
                             idx += 1;
                             if list.len() > idx {
-                                self.stack.push(list[idx].clone());
+                                top = list[idx].clone();
                                 self.path.push(Form::List(list, idx));
                                 break;
                             } else {
+                                top = ZapExp::Nil;
                                 self.path.push(Form::Call(list.len()));
                             }
                         }
-                        Form::If => {
-                            if self.stack.pop().unwrap().is_truish() {
-                                self.stack.swap_remove(self.stack.len() - 2);
+                        Form::If(branches) => {
+                            if top.is_truish() {
+                                top = branches[2].clone();
                             } else {
-                                self.stack.truncate(self.stack.len() - 1);
+                                top = branches[3].clone();
                             };
                             break;
                         }
@@ -226,10 +226,11 @@ impl<E: Env> Evaluator<E> {
                                 }
                             } else if idx % 2 == 0 {
                                 // idx is even, so a key is on the top of the stack
-                                match self.stack[self.stack.len() - 1] {
+                                match &top {
                                     ZapExp::Symbol(_) => {
                                         idx += 1;
-                                        self.stack.push(bindings[idx].clone());
+                                        self.stack.push(top);
+                                        top = bindings[idx].clone();
                                         self.path.push(Form::Let(bindings, idx));
                                     }
                                     _ => {
@@ -240,32 +241,27 @@ impl<E: Env> Evaluator<E> {
                                 }
                             } else {
                                 // idx is odd, so val in on the top of the stack
-                                self.env.set(
-                                    &self.stack[self.stack.len() - 2],
-                                    &self.stack[self.stack.len() - 1],
-                                )?;
-
-                                self.stack.truncate(self.stack.len() - 2);
+                                self.env.set(&self.stack.pop().unwrap(), &top)?;
 
                                 idx += 1;
                                 if bindings.len() > idx {
-                                    self.stack.push(bindings[idx].clone());
+                                    top = bindings[idx].clone();
                                     self.path.push(Form::Let(bindings, idx));
                                     continue;
                                 } else {
+                                    top = self.stack.pop().unwrap();
                                     self.path.push(Form::Let(bindings, idx));
                                 }
                             };
                             break;
                         }
                         Form::Define => {
-                            let symbol = self.stack.swap_remove(self.stack.len() - 2);
-                            let val = &self.stack[self.stack.len() - 1]; // We keep the last because that's what we return
-                            self.env.set_global(&symbol, val)?;
+                            let symbol = self.stack.pop().unwrap();
+                            self.env.set_global(&symbol, &top)?;
                         }
                         Form::Do(list, mut idx) => {
                             idx += 1;
-                            self.stack.push(list[idx].clone());
+                            top = list[idx].clone();
                             if list.len() > (idx + 1) {
                                 // All but the last
                                 self.path.push(Form::Do(list, idx));
@@ -275,7 +271,7 @@ impl<E: Env> Evaluator<E> {
                         Form::Call(argc) => {
                             let params = &self.stack[self.stack.len() - argc..];
 
-                            let exp = match &params[0] {
+                            top = match &params[0] {
                                 ZapExp::Func(f) => match &**f {
                                     ZapFn::Native(_, f) => f(&params[1..])?,
                                     ZapFn::Func { args, ast } => {
@@ -298,8 +294,6 @@ impl<E: Env> Evaluator<E> {
                             };
                             // Clear the args from the stack
                             self.stack.truncate(self.stack.len() - argc);
-
-                            self.stack.push(exp);
                             break;
                         }
                         Form::Return => {
@@ -308,7 +302,7 @@ impl<E: Env> Evaluator<E> {
                         Form::Quote => {}
                     };
                 } else {
-                    return Ok(self.stack.pop().unwrap());
+                    return Ok(top);
                 }
             }
         }
