@@ -27,7 +27,7 @@ pub trait Env {
     fn set(&mut self, key: &ZapExp, val: &ZapExp) -> Result<(), ZapErr>;
     fn set_global(&mut self, key: &ZapExp, val: &ZapExp) -> Result<(), ZapErr>;
     fn reg_symbol(&mut self, s: String) -> ZapExp;
-    fn get_symbol(&self, key: Symbol) -> Result<String, ZapErr>;
+    fn get_symbol(&self, key: &Symbol) -> Result<String, ZapErr>;
     fn reg_fn(&mut self, symbol: &str, f: ZapFnNative);
 }
 
@@ -96,7 +96,7 @@ impl Env for SandboxEnv {
         self.scope
             .get(&key)
             .cloned()
-            .ok_or_else(|| match self.get_symbol(key) {
+            .ok_or_else(|| match self.get_symbol(&key) {
                 Ok(s) => error(format!("symbol '{}' not in scope.", s).as_str()),
                 Err(err) => err,
             })
@@ -132,12 +132,12 @@ impl Env for SandboxEnv {
         ZapExp::Symbol(*id)
     }
 
-    fn get_symbol(&self, id: Symbol) -> Result<String, ZapErr> {
+    fn get_symbol(&self, id: &Symbol) -> Result<String, ZapErr> {
         self.symbols
             .iter()
-            .find(|(_, v)| **v == id)
+            .find(|(_, v)| **v == *id)
             .map(|(k, _)| k.clone())
-            .ok_or_else(|| error(format!("No known symbol for id={}", id).as_str()))
+            .ok_or_else(|| error(format!("No known symbol for id={}", *id).as_str()))
     }
 
     fn reg_fn(&mut self, symbol: &str, f: ZapFnNative) {

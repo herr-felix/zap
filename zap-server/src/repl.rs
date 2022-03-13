@@ -51,7 +51,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
                         match evaluated {
                             Ok(result) => {
                                 output
-                                    .write(format!("{}\n", result.pr_str()).as_bytes())
+                                    .write(format!("{}\n", result.pr_str(session.get_env())).as_bytes())
                                     .await?;
                                 output
                                     .write(format!("Evaluated in {:?}\n", end - start).as_bytes())

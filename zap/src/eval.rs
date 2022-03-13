@@ -193,11 +193,6 @@ impl<E: Env> Evaluator<E> {
             };
 
             loop {
-                #[cfg(debug_assertions)]
-                println!("PATH: {:?}", self.path);
-                #[cfg(debug_assertions)]
-                println!("STACK: {:?}\n", self.stack);
-
                 if let Some(parent) = self.path.pop() {
                     match parent {
                         Form::List(list, mut idx) => {
