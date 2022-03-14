@@ -1,4 +1,5 @@
-use smartstring::alias::String;
+pub use chrono::{DateTime, Duration, Utc};
+pub use smartstring::alias::String;
 use std::sync::Arc;
 
 pub type Symbol = usize;
@@ -65,6 +66,8 @@ pub enum ZapExp {
     Str(String),
     List(ZapList),
     Func(Arc<ZapFn>),
+    DateTime(DateTime<Utc>),
+    Duration(Duration),
 }
 
 impl ZapExp {
@@ -73,7 +76,7 @@ impl ZapExp {
     }
 
     pub fn is_truish(&self) -> bool {
-        !matches!(*self, ZapExp::Nil | ZapExp::Bool(false))
+        !matches!(self, ZapExp::Nil | ZapExp::Bool(false))
     }
 }
 
@@ -83,14 +86,46 @@ impl Default for ZapExp {
     }
 }
 
-impl core::ops::Add for ZapExp {
-    type Output = Self;
+impl core::ops::Add for &ZapExp {
+    type Output = ZapResult;
 
-    fn add(self, other: Self) -> Self {
-        if let (ZapExp::Number(a), ZapExp::Number(b)) = (self, other) {
-            return ZapExp::Number(a + b);
+    #[inline(always)]
+    fn add(self, other: Self) -> Self::Output {
+        match (self, other) {
+            (ZapExp::Number(a), ZapExp::Number(b)) => Ok(ZapExp::Number(a + b)),
+            (a, b) => Err(error(format!("Can't add {} + {}", a, b).as_str())),
         }
-        ZapExp::Nil
+    }
+}
+
+impl core::ops::Sub for &ZapExp {
+    type Output = ZapResult;
+
+    #[inline(always)]
+    fn sub(self, other: Self) -> Self::Output {
+        match (self, other) {
+            (ZapExp::Number(a), ZapExp::Number(b)) => Ok(ZapExp::Number(a - b)),
+            (ZapExp::DateTime(a), ZapExp::DateTime(b)) => Ok(ZapExp::Duration(*a - *b)),
+            (a, b) => Err(error(format!("Can't substract {} - {}", a, b).as_str())),
+        }
+    }
+}
+
+impl core::ops::Mul for &ZapExp {
+    type Output = ZapResult;
+
+    #[inline(always)]
+    fn mul(self, other: Self) -> Self::Output {
+        match (self, other) {
+            (ZapExp::Number(a), ZapExp::Number(b)) => Ok(ZapExp::Number(a * b)),
+            (a, b) => Err(error(format!("Can't multiply {} - {}", a, b).as_str())),
+        }
+    }
+}
+
+impl From<bool> for ZapExp {
+    fn from(b: bool) -> Self {
+        ZapExp::Bool(b)
     }
 }
 
