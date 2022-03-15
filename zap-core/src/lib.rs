@@ -1,17 +1,53 @@
 use zap::env::Env;
-use zap::types::ZapExp::Number;
+use zap::types::Utc;
 use zap::types::{error, ZapExp, ZapResult};
 
-fn plus(args: &[ZapExp]) -> ZapResult {
-    let mut sum = 0.0;
-    for v in args {
-        if let ZapExp::Number(x) = v {
-            sum += x;
-        } else {
-            return Err(error("+ can only add numbers."));
+fn add(args: &[ZapExp]) -> ZapResult {
+    match args.len() {
+        0 => Ok(ZapExp::Number(0.0)),
+        1 => Ok(args[0].clone()),
+        2 => &args[0] + &args[1],
+        _ => {
+            let mut iter = args.iter();
+            let mut acc = (iter.next().unwrap() + iter.next().unwrap())?;
+            for arg in iter {
+                acc = (&acc + arg)?;
+            }
+            Ok(acc)
         }
     }
-    Ok(Number(sum))
+}
+
+fn sub(args: &[ZapExp]) -> ZapResult {
+    match args.len() {
+        0 => Ok(ZapExp::Number(0.0)),
+        1 => Ok(args[0].clone()),
+        2 => &args[0] - &args[1],
+        _ => {
+            let mut iter = args.iter();
+            let mut acc = (iter.next().unwrap() - iter.next().unwrap())?;
+            for arg in iter {
+                acc = (&acc - arg)?;
+            }
+            Ok(acc)
+        }
+    }
+}
+
+fn mul(args: &[ZapExp]) -> ZapResult {
+    match args.len() {
+        0 => Ok(ZapExp::Number(0.0)),
+        1 => Ok(args[0].clone()),
+        2 => &args[0] * &args[1],
+        _ => {
+            let mut iter = args.iter();
+            let mut acc = (iter.next().unwrap() * iter.next().unwrap())?;
+            for arg in iter {
+                acc = (&acc * arg)?;
+            }
+            Ok(acc)
+        }
+    }
 }
 
 fn is_float(args: &[ZapExp]) -> ZapResult {
@@ -66,20 +102,36 @@ fn concat(args: &[ZapExp]) -> ZapResult {
 }
 
 fn equal(args: &[ZapExp]) -> ZapResult {
-    if args.len() != 2 {
-        return Err(error("'=' requires at 2 argument."));
+    match args.len() {
+        0 => Err(error("'=' requires more than 0 arguments.")),
+        1 => Ok(true.into()),
+        2 => Ok((args[0] == args[1]).into()),
+        _ => {
+            let mut iter = args.iter();
+            let mut prev = iter.next().unwrap();
+            for arg in iter {
+                if prev == arg {
+                    prev = arg;
+                } else {
+                    return Ok(false.into());
+                }
+            }
+            Ok(true.into())
+        }
     }
+}
 
-    let a = &args[0];
-    let b = &args[1];
-
-    Ok(ZapExp::Bool(a == b))
+fn now(_: &[ZapExp]) -> ZapResult {
+    Ok(ZapExp::DateTime(Utc::now()))
 }
 
 pub fn load<E: Env>(env: &mut E) {
-    env.reg_fn("+", plus);
+    env.reg_fn("+", add);
+    env.reg_fn("-", sub);
+    env.reg_fn("*", mul);
     env.reg_fn("float?", is_float);
     env.reg_fn("false?", is_false);
     env.reg_fn("concat", concat);
     env.reg_fn("=", equal);
+    env.reg_fn("now", now);
 }
