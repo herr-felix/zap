@@ -129,7 +129,7 @@ impl From<bool> for ZapExp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ZapErr {
     Msg(std::string::String),
 }

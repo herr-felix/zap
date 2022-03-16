@@ -8,7 +8,17 @@ type SymbolTable = FxHashMap<String, Symbol>;
 
 // TODO: Make sures all the default symbols (for special forms) are here.
 // TODO: Make a macro that generate const Symbol for each default symbols.
-const DEFAULT_SYMBOLS: [&str; 6] = ["if", "let", "fn", "do", "define", "quote"];
+const DEFAULT_SYMBOLS: [&str; 9] = [
+    "if",
+    "let",
+    "fn",
+    "do",
+    "define",
+    "quote",
+    "quasiquote",
+    "unquote",
+    "splice-unquote",
+];
 pub mod symbols {
     use crate::types::Symbol;
 
@@ -18,6 +28,9 @@ pub mod symbols {
     pub const DO: Symbol = 3;
     pub const DEFINE: Symbol = 4;
     pub const QUOTE: Symbol = 5;
+    pub const QUASIQUOTE: Symbol = 6;
+    pub const UNQUOTE: Symbol = 7;
+    pub const SPLICE_UNQUOTE: Symbol = 8;
 }
 
 pub trait Env {

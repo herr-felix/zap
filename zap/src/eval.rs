@@ -3,11 +3,13 @@ use crate::env::Env;
 use crate::types::{error, ZapExp, ZapFn, ZapList, ZapResult};
 
 enum Form {
-    List(ZapList, usize),
+    List(ZapList, usize, usize),
     If(ZapList),
     Do(ZapList, usize),
     Define,
-    Quote,
+    Quasiquote(bool),
+    Unquote,
+    SpliceUnquote(ZapList, usize, usize),
     Let(ZapList, usize, usize),
     Call(usize),
     Return,
@@ -16,14 +18,16 @@ enum Form {
 impl std::fmt::Debug for Form {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Form::List(l, s) => write!(f, "List({:?}, {})", l, s),
-            Form::If(_) => write!(f, "If"),
-            Form::Do(_, _) => write!(f, "Do"),
-            Form::Define => write!(f, "Define"),
-            Form::Quote => write!(f, "Quote"),
-            Form::Let(_, _, _) => write!(f, "Let"),
-            Form::Call(n) => write!(f, "Call({})", n),
-            Form::Return => write!(f, "Return"),
+            Form::List(l, _, s) => write!(f, "List({:?}, {})", l, s),
+            Form::If(_) => write!(f, "IF"),
+            Form::Do(_, _) => write!(f, "DO"),
+            Form::Define => write!(f, "DEFINE"),
+            Form::Unquote => write!(f, "UNQUOTE"),
+            Form::Quasiquote(_) => write!(f, "QUASIQUOTE"),
+            Form::SpliceUnquote(_, _, _) => write!(f, "SPLICE-UNQUOTE"),
+            Form::Let(bindings, _, exp) => write!(f, "LET, {:?}, {}", bindings, exp),
+            Form::Call(n) => write!(f, "CALL({})", n),
+            Form::Return => write!(f, "RETURN"),
         }
     }
 }
@@ -55,12 +59,49 @@ impl<E: Env> Evaluator<E> {
     #[inline(always)]
     fn push_quote_form(&mut self, list: ZapList) -> ZapResult {
         match list.len() {
-            2 => {
-                self.path.push(Form::Quote);
-                Ok(list[1].clone())
-            }
+            2 => Ok(list[1].clone()),
             x if x > 2 => Err(error("too many parameteres to quote")),
             _ => Err(error("nothing to quote.")),
+        }
+    }
+
+    #[inline(always)]
+    fn push_quasiquote_form(&mut self, list: ZapList, outer: bool) -> ZapResult {
+        match list.len() {
+            2 => {
+                self.path.push(Form::Quasiquote(outer));
+                Ok(list[1].clone())
+            }
+            x if x > 2 => Err(error("too many parameteres to quasiquote")),
+            _ => Err(error("nothing to quasiquote.")),
+        }
+    }
+
+    #[inline(always)]
+    fn push_unquote_form(&mut self, list: ZapList) -> ZapResult {
+        match list.len() {
+            2 => {
+                self.path.push(Form::Unquote);
+                Ok(list[1].clone())
+            }
+            x if x > 2 => Err(error("too many parameteres to unquote")),
+            _ => Err(error("nothing to unquote.")),
+        }
+    }
+
+    #[inline(always)]
+    fn push_splice_unquote_form(&mut self, list: ZapList) -> ZapResult {
+        match list.len() {
+            2 => {
+                if let Form::List(parent_list, idx, len) = self.path.pop().unwrap() {
+                    self.path.push(Form::SpliceUnquote(parent_list, idx, len));
+                    Ok(list[1].clone())
+                } else {
+                    Err(error("Cannot splice-unquote out of a list."))
+                }
+            }
+            x if x > 2 => Err(error("too many parameteres to splice-unquote.")),
+            _ => Err(error("nothing to splice-unquote.")),
         }
     }
 
@@ -140,6 +181,8 @@ impl<E: Env> Evaluator<E> {
         self.path.clear();
         self.stack.clear();
 
+        let mut quasiquoted = false;
+
         let mut top = root;
 
         loop {
@@ -172,17 +215,42 @@ impl<E: Env> Evaluator<E> {
                                     top = self.push_define_form(list)?;
                                     continue;
                                 } else if id == symbols::QUOTE {
-                                    top = self.push_quote_form(list)?
+                                    top = self.push_quote_form(list)?;
+                                } else if id == symbols::QUASIQUOTE {
+                                    top = self.push_quasiquote_form(list, quasiquoted)?;
+                                    quasiquoted = true;
+                                    continue;
+                                } else if id == symbols::UNQUOTE {
+                                    if quasiquoted {
+                                        top = self.push_unquote_form(list)?;
+                                        quasiquoted = false;
+                                        continue;
+                                    } else {
+                                        return Err(error(
+                                            "Unquoting is only possible within a quasiquote.",
+                                        ));
+                                    }
+                                } else if id == symbols::SPLICE_UNQUOTE {
+                                    if quasiquoted {
+                                        quasiquoted = false;
+                                        top = self.push_splice_unquote_form(list)?;
+                                        continue;
+                                    } else {
+                                        return Err(error("Splice-unquoting is only possible within a quasiquote."));
+                                    }
                                 } else if id == symbols::FN {
                                     top = self.register_fn(list)?
                                 } else {
                                     top = self.env.get(id)?;
-                                    self.path.push(Form::List(list, 0));
+                                    let len = list.len();
+                                    self.path.push(Form::List(list, 0, len));
                                 }
                             }
                             _ => {
                                 top = list[0].clone();
-                                self.path.push(Form::List(list, 0));
+                                let len = list.len();
+                                self.path.push(Form::List(list, 0, len));
+                                continue;
                             }
                         }
                     } else {
@@ -190,7 +258,9 @@ impl<E: Env> Evaluator<E> {
                     }
                 }
                 ZapExp::Symbol(s) => {
-                    top = self.env.get(s)?;
+                    if !quasiquoted {
+                        top = self.env.get(s)?;
+                    }
                 }
                 atom => {
                     top = atom;
@@ -200,16 +270,20 @@ impl<E: Env> Evaluator<E> {
             loop {
                 if let Some(parent) = self.path.pop() {
                     match parent {
-                        Form::List(list, mut idx) => {
+                        Form::List(list, mut idx, len) => {
                             self.stack.push(top);
                             idx += 1;
                             if list.len() > idx {
                                 top = list[idx].clone();
-                                self.path.push(Form::List(list, idx));
+                                self.path.push(Form::List(list, idx, len));
                                 break;
+                            } else if quasiquoted {
+                                top = ZapExp::List(ZapExp::new_list(
+                                    self.stack[self.stack.len() - len..].to_vec(),
+                                ));
                             } else {
                                 top = ZapExp::Nil;
-                                self.path.push(Form::Call(list.len()));
+                                self.path.push(Form::Call(len));
                             }
                         }
                         Form::If(branches) => {
@@ -226,6 +300,7 @@ impl<E: Env> Evaluator<E> {
                                 if !self.is_in_tail() {
                                     self.env.pop();
                                 }
+                                continue;
                             } else if idx % 2 == 0 {
                                 // idx is even, so a key is on the top of the stack
                                 match top {
@@ -300,7 +375,21 @@ impl<E: Env> Evaluator<E> {
                         Form::Return => {
                             self.env.pop();
                         }
-                        Form::Quote => {}
+                        Form::Unquote => {
+                            quasiquoted = true;
+                        }
+                        Form::Quasiquote(outer) => {
+                            quasiquoted = outer;
+                        }
+                        Form::SpliceUnquote(list, idx, len) => match top {
+                            ZapExp::List(seq) => {
+                                self.path.push(Form::List(list, idx, len + seq.len() - 1));
+                                self.stack.extend_from_slice(&seq[..seq.len() - 1]);
+                                top = seq[seq.len() - 1].clone();
+                                quasiquoted = true;
+                            }
+                            _ => return Err(error("cannot splice-unquote a non-sequence.")),
+                        },
                     };
                 } else {
                     return Ok(top);

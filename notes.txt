@@ -13,7 +13,20 @@ a certain mutation.
 
 - Async partout?
 
-- Interning all strings used for symbols. Using usize for symbol.
-
 - Functions: Differenciate between native functions and regular functions.
-Arguments are stored as a slice of strings.
+Arguments are stored as a slice of .
+
+- Built-in Open Metrics endpoint:
+    - Domain count
+    - Domain uptime
+    - Total evaluation time per domain
+    - Total evaluations count per domain
+    - Total count of global mutations (define) per domain
+    - Total number of keys in the global scope (per domain)
+    - Posibility for plugins to send custum metrics through env.
+    - Endpoint (address, port) configurable in config file under [metrics]
+
+- zap-integration crate containing all the types (often as re-exports from zap) useful for creating server extensions.
+    - Helper function for Tokio handle spawn
+
+- zap-server: cfb for storing the state https://mdsteele.games/rust-cfb/cfb/index.html

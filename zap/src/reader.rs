@@ -14,6 +14,7 @@ use crate::types::{error, ZapErr, ZapExp};
 enum Token {
     Atom(std::string::String),
     Quote,
+    Quasiquote,
     Unquote,
     ListStart,
     ListEnd,
@@ -26,6 +27,7 @@ impl std::fmt::Display for Token {
         match self {
             Token::Atom(s) => write!(f, "Atom({})", s),
             Token::Quote => write!(f, "Quote"),
+            Token::Quasiquote => write!(f, "Quasiquote"),
             Token::Unquote => write!(f, "Unquote"),
             Token::SpliceUnquote => write!(f, "SpliceUnquote"),
             Token::Deref => write!(f, "Deref"),
@@ -38,6 +40,7 @@ impl std::fmt::Display for Token {
 enum ParentForm {
     List(Vec<ZapExp>),
     Quote,
+    Quasiquote,
     Unquote,
     SpliceUnquote,
     Deref,
@@ -95,7 +98,7 @@ impl Reader {
     }
 
     #[inline(always)]
-    fn flush_token(&mut self) {
+    pub fn flush_token(&mut self) {
         if !self.token_buf.is_empty() {
             self.token_buf.shrink_to_fit();
             self.tokens.push_back(Token::Atom(self.token_buf.clone()));
@@ -151,7 +154,10 @@ impl Reader {
                 '@' => {
                     self.tokens.push_back(Token::Deref);
                 }
-                '`' | '^' => {
+                '`' => {
+                    self.tokens.push_back(Token::Quasiquote);
+                }
+                '^' => {
                     if self.token_buf.is_empty() {
                         self.tokens.push_back(Token::Atom(ch.to_string()));
                     } else {
@@ -232,6 +238,10 @@ impl Reader {
                     self.stack.push(ParentForm::Quote);
                     continue;
                 }
+                Token::Quasiquote => {
+                    self.stack.push(ParentForm::Quasiquote);
+                    continue;
+                }
                 Token::SpliceUnquote => {
                     self.stack.push(ParentForm::SpliceUnquote);
                     continue;
@@ -251,6 +261,9 @@ impl Reader {
                 Token::ListEnd => match self.stack.pop() {
                     Some(ParentForm::List(seq)) => ZapExp::List(ZapExp::new_list(seq)),
                     Some(ParentForm::Quote) => return Err(self.read_error("Cannot quote a ')'")),
+                    Some(ParentForm::Quasiquote) => {
+                        return Err(self.read_error("Cannot quasiquote a ')'"))
+                    }
                     Some(ParentForm::Unquote) => {
                         return Err(self.read_error("Cannot unquote a ')'"))
                     }
@@ -269,6 +282,9 @@ impl Reader {
                 }
                 Some(ParentForm::Quote) => {
                     self.expand_reader_macro(env.reg_symbol(String::from("quote")), exp)
+                }
+                Some(ParentForm::Quasiquote) => {
+                    self.expand_reader_macro(env.reg_symbol(String::from("quasiquote")), exp)
                 }
                 Some(ParentForm::Unquote) => {
                     self.expand_reader_macro(env.reg_symbol(String::from("unquote")), exp)
