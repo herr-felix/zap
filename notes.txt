@@ -30,3 +30,6 @@ Arguments are stored as a slice of .
     - Helper function for Tokio handle spawn
 
 - zap-server: cfb for storing the state https://mdsteele.games/rust-cfb/cfb/index.html
+
+- QUESTIONS
+    - Should the zap core lib be in "zap" or its own project ("zap-core")?
