@@ -2,7 +2,7 @@ use crate::env::{symbols, Env};
 use crate::vm::{Chunk, Op};
 use crate::zap::{error_msg, Result, Symbol, Value, ZapList};
 use std::ops::Range;
-use std::rc::Rc;
+use std::sync::Arc;
 
 // The compiler takes the expression returned by the reader and return an array of bytecodes
 // which can be executed by the VM.
@@ -16,6 +16,7 @@ enum Form {
     Value(Value),
     List(ZapList, u8),
     Apply(ApplyKind),
+    If(ZapList, Option<Vec<Op>>, Option<Vec<Op>>),
 }
 
 struct Compiler {
@@ -23,6 +24,14 @@ struct Compiler {
     forms: Vec<Form>,
     next_available_reg: Option<u8>,
     argc: u8,
+}
+
+fn is_leaf(val: &Value) -> bool {
+    !matches!(val, Value::List(l) if l.len() > 0)
+}
+
+fn list_is_leaf(list: &ZapList) -> bool {
+    list.iter().all(is_leaf)
 }
 
 impl Compiler {
@@ -40,7 +49,7 @@ impl Compiler {
     }
 
     pub fn chunk(self) -> Chunk {
-        Rc::new(self.chunk)
+        Arc::new(self.chunk)
     }
 
     pub fn set_argc(&mut self, argc: u8) {
@@ -54,10 +63,6 @@ impl Compiler {
         } else {
             self.emit(Op::Push { val })
         }
-    }
-
-    fn is_root_call(&self) -> bool {
-        !self.forms.is_empty()
     }
 
     fn emit(&mut self, op: Op) {
@@ -76,14 +81,25 @@ impl Compiler {
                 "A function cannot have more than 254 parameters.",
             ));
         }
-        self.next_available_reg = None;
-        // TODO: Check if all elements of the list are atom. If so, set registers instead of
-        // pushing up the stack.
-        //
+
+        if !list_is_leaf(&list) {
+            self.next_available_reg = None;
+        }
+
         match list[0] {
             Value::Symbol(symbols::PLUS) => {
                 self.forms.push(Form::Apply(ApplyKind::Add));
                 self.forms.push(Form::List(list, 1));
+                return Ok(());
+            }
+            Value::Symbol(symbols::IF) => {
+                if list.len() != 4 {
+                    return Err(error_msg("An if form must have 3 parameters"));
+                }
+                let cond = list[1].clone();
+                self.next_available_reg = Some(0);
+                self.forms.push(Form::If(list, None, None));
+                self.forms.push(Form::Value(cond));
                 return Ok(());
             }
             _ => self.forms.push(Form::Apply(ApplyKind::Call)),
@@ -126,11 +142,16 @@ impl Compiler {
                         dst: 0,
                         val: Value::Number(0.0),
                     });
+                } else if argc == 1 {
+                    if args_stacked {
+                        self.emit(Op::Pop { dst: 0 });
+                    }
                 } else {
                     if args_stacked {
                         self.emit(Op::Pop { dst: 0 });
-                        argc -= 1;
                     }
+                    argc -= 1;
+
                     while argc > 0 {
                         if args_stacked {
                             self.emit(Op::Pop { dst: 1 });
@@ -138,7 +159,7 @@ impl Compiler {
                         } else {
                             self.emit(Op::Add {
                                 a: 0,
-                                b: argc - 1,
+                                b: argc,
                                 dst: 0,
                             });
                         }
@@ -147,9 +168,37 @@ impl Compiler {
                 }
             }
         }
-        if self.is_root_call() {
+        if matches!(self.forms.last(), Some(Form::List(_, _))) {
             self.emit(Op::PushRet);
         }
+    }
+
+    pub fn then_branch(&mut self, args: ZapList) {
+        let branch = args[2].clone();
+        self.next_available_reg = Some(0);
+        self.forms
+            .push(Form::If(args, Some(std::mem::take(&mut self.chunk)), None));
+        self.forms.push(Form::Value(branch));
+    }
+
+    pub fn else_branch(&mut self, args: ZapList, chunk: Vec<Op>) {
+        let branch = args[3].clone();
+        self.next_available_reg = Some(0);
+        self.forms.push(Form::If(
+            args,
+            Some(chunk),
+            Some(std::mem::take(&mut self.chunk)),
+        ));
+        self.forms.push(Form::Value(branch));
+    }
+
+    pub fn combine_branches(&mut self, chunk: Vec<Op>, then_branch: Vec<Op>) {
+        let else_branch = std::mem::replace(&mut self.chunk, chunk);
+
+        self.emit(Op::CondJmp(1 + else_branch.len()));
+        self.chunk.extend(else_branch);
+        self.emit(Op::CondJmp(then_branch.len()));
+        self.chunk.extend(then_branch);
     }
 }
 
@@ -178,6 +227,23 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Chunk> {
             }
             Form::Apply(kind) => {
                 compiler.apply(kind);
+            }
+            Form::If(args, chunk, then_branch) => {
+                match (chunk, then_branch) {
+                    (None, None) => {
+                        // Then branch
+                        compiler.then_branch(args);
+                    }
+                    (Some(chunk), None) => {
+                        // Else branch
+                        compiler.else_branch(args, chunk);
+                    }
+                    (Some(chunk), Some(then_branch)) => {
+                        // Combine the branches in the chunk
+                        compiler.combine_branches(chunk, then_branch);
+                    }
+                    _ => {}
+                }
             }
         }
     }

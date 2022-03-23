@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub use smartstring::alias::String;
 
@@ -7,7 +7,7 @@ use crate::vm::Chunk;
 
 pub type Symbol = usize;
 
-pub type ZapList = Rc<Vec<Value>>;
+pub type ZapList = Arc<Vec<Value>>;
 pub type Result<T> = std::result::Result<T, ZapErr>;
 
 #[derive(Clone, Debug)]
@@ -30,7 +30,7 @@ impl Value {
     }
 
     pub fn new_list(list: Vec<Value>) -> ZapList {
-        Rc::new(list)
+        Arc::new(list)
     }
 
     pub fn is_truthy(&self) -> bool {
@@ -113,7 +113,7 @@ impl PartialEq for ZapFn {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (ZapFn::Native(a, _), ZapFn::Native(b, _)) => a == b,
-            (ZapFn::Chunk(a), ZapFn::Chunk(b)) => Rc::ptr_eq(a, b),
+            (ZapFn::Chunk(a), ZapFn::Chunk(b)) => Arc::ptr_eq(a, b),
             (_, _) => false,
         }
     }

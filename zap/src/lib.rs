@@ -5,6 +5,8 @@ pub mod reader;
 pub mod vm;
 pub mod zap;
 
+pub use crate::zap::*;
+
 pub trait Evaluator {
     fn eval<E: env::Env>(&mut self, env: &mut E);
 }
@@ -20,6 +22,7 @@ mod tests {
     fn run_exp(src: &str) -> String {
         let mut reader = Reader::new();
 
+        dbg!(src);
         reader.tokenize(src);
         reader.flush_token();
 
@@ -68,5 +71,15 @@ mod tests {
         assert_eq!(run_exp("(+ 1 2)"), "3");
         assert_eq!(run_exp("(+ 1 2 2)"), "5");
         assert_eq!(run_exp("(+ 1 2 3 (+ 4 2))"), "12");
+    }
+
+    #[test]
+    fn eval_if() {
+        assert_eq!(run_exp("(if true 10 20)"), "10");
+        assert_eq!(run_exp("(if false 10 20)"), "20");
+        assert_eq!(run_exp("(if nil false true)"), "true");
+        assert_eq!(run_exp("(if (+ 1 2) false true)"), "false");
+        assert_eq!(run_exp("(if (+ 1 2) (+ 1 2) true)"), "3");
+        assert_eq!(run_exp("(if false (+ 1 2) (+ 2 2))"), "4");
     }
 }

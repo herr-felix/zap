@@ -4,10 +4,11 @@ use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::task;
 
+use zap::compiler::compile;
 use zap::env::SandboxEnv;
-use zap::eval::Evaluator;
 use zap::reader::Reader;
-use zap::types::ZapErr;
+use zap::vm::VM;
+use zap::ZapErr;
 
 pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
     let (mut input, mut output) = stream.into_split();
@@ -19,7 +20,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
 
     zap_core::load(&mut env);
 
-    let mut session = Evaluator::new(env);
+    let mut vm = VM::init();
 
     loop {
         output.write("> ".as_bytes()).await?;
@@ -41,23 +42,25 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
             reader.tokenize(src);
 
             loop {
-                match reader.read_form(session.get_env()) {
+                match reader.read_ast(&mut env) {
                     Ok(Some(form)) => {
-                        let evaluator = &mut session;
-                        let start = Instant::now();
-                        let evaluated = task::block_in_place(move || evaluator.eval(form));
-                        let end = Instant::now();
+                        let vm = &mut vm;
+                        let env2 = &mut env;
+
+                        let evaluated = task::block_in_place(move || {
+                            let chunk = compile(form, env2)?;
+                            let start = Instant::now();
+                            let res = vm.run(chunk, env2)?;
+                            let end = Instant::now();
+                            println!("Evaluated in {:?}\n", end - start);
+                            Ok(res)
+                        });
 
                         match evaluated {
                             Ok(result) => {
+                                let env = &mut env;
                                 output
-                                    .write(
-                                        format!("{}\n", result.pr_str(session.get_env()))
-                                            .as_bytes(),
-                                    )
-                                    .await?;
-                                output
-                                    .write(format!("Evaluated in {:?}\n", end - start).as_bytes())
+                                    .write(format!("{}\n", result.pr_str(env)).as_bytes())
                                     .await?;
                             }
                             Err(ZapErr::Msg(err)) => {

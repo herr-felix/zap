@@ -1,5 +1,5 @@
 use std::fmt;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::env::Env;
 use crate::zap::{error_msg, Result, Value, ZapFn};
@@ -17,6 +17,8 @@ pub enum Op {
     PushRet,                         // Push r(0) on the stack
     Pop { dst: RegID },              // Pop a value from the stack into a register
     Call { argc: u8 },               // Call the function at reg(0) with argc arguments
+    CondJmp(usize),                  // Jump forward n ops if reg(0) is truty
+    Jmp(usize),                      // Jump forward n ops
 }
 
 impl fmt::Debug for Op {
@@ -29,11 +31,13 @@ impl fmt::Debug for Op {
             Op::PushRet => write!(f, "PUSHRET"),
             Op::Pop { dst } => write!(f, "POP     {}", dst),
             Op::Call { argc } => write!(f, "CALL    {}", argc),
+            Op::CondJmp(n) => write!(f, "CONDJMP {}", n),
+            Op::Jmp(n) => write!(f, "JMP     {}", n),
         }
     }
 }
 
-pub type Chunk = Rc<Vec<Op>>;
+pub type Chunk = Arc<Vec<Op>>;
 
 pub struct VM {
     pc: usize,
@@ -47,36 +51,40 @@ impl VM {
     pub fn init() -> Self {
         VM {
             pc: 0,
-            chunk: Rc::new(Vec::new()),
+            chunk: Arc::new(Vec::new()),
             stack: Vec::with_capacity(32),
             call_stack: Vec::with_capacity(32),
             regs: [(); 256].map(|_| Value::default()),
         }
     }
 
+    #[inline(always)]
     fn get_next_op(&mut self) -> Option<Op> {
         self.pc += 1;
-        // Check if we are at the end of the current chunk. If so, pop a chunk off the stack
-        // and set it back as the current chunk. If the stack is empty, we are done running.
-        if self.chunk.len() < self.pc {
-            if let Some((chunk, pc)) = self.call_stack.pop() {
-                self.pc = pc;
-                self.chunk = chunk;
-            } else {
-                return None;
-            }
-        }
-        Some(self.chunk[self.pc - 1].clone())
+        self.chunk.get(self.pc - 1).cloned()
     }
 
+    fn pop_call(&mut self) -> bool {
+        if let Some((chunk, pc)) = self.call_stack.pop() {
+            self.pc = pc;
+            self.chunk = chunk;
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline(always)]
     fn set_reg(&mut self, idx: RegID, val: Value) {
         self.regs[idx as usize] = val;
     }
 
+    #[inline(always)]
     fn reg(&self, idx: RegID) -> Value {
         self.regs[idx as usize].clone()
     }
 
+    #[inline(always)]
     fn pop_to_reg(&mut self, reg: RegID) -> Result<()> {
         if let Some(val) = self.stack.pop() {
             self.set_reg(reg, val);
@@ -86,6 +94,7 @@ impl VM {
         }
     }
 
+    #[inline(always)]
     fn push_ret(&mut self) {
         let val = std::mem::take(&mut self.regs[0]);
         self.stack.push(val);
@@ -113,22 +122,39 @@ impl VM {
         }
     }
 
+    #[inline(always)]
+    fn jump(&mut self, n: usize) {
+        self.pc += n;
+    }
+
     pub fn run<E: Env>(&mut self, chunk: Chunk, _env: &mut E) -> Result<Value> {
         self.pc = 0;
         self.chunk = chunk;
+
+        #[cfg(debug_assertions)]
         dbg!(&self.chunk);
 
-        while let Some(op) = self.get_next_op() {
-            match op {
-                Op::Move { dst, src } => {
-                    self.regs[dst as usize] = self.regs[src as usize].clone();
+        loop {
+            if let Some(op) = self.get_next_op() {
+                match op {
+                    Op::Move { dst, src } => {
+                        self.regs[dst as usize] = self.regs[src as usize].clone();
+                    }
+                    Op::Set { dst, val } => self.set_reg(dst, val),
+                    Op::Add { a, b, dst } => self.set_reg(dst, (self.reg(a) + self.reg(b))?),
+                    Op::Push { val } => self.stack.push(val),
+                    Op::PushRet => self.push_ret(),
+                    Op::Pop { dst } => self.pop_to_reg(dst)?,
+                    Op::Call { argc } => self.call(argc)?,
+                    Op::CondJmp(n) => {
+                        if self.reg(0).is_truthy() {
+                            self.jump(n)
+                        }
+                    }
+                    Op::Jmp(n) => self.jump(n),
                 }
-                Op::Set { dst, val } => self.set_reg(dst, val),
-                Op::Add { a, b, dst } => self.set_reg(dst, (self.reg(a) + self.reg(b))?),
-                Op::Push { val } => self.stack.push(val),
-                Op::PushRet => self.push_ret(),
-                Op::Pop { dst } => self.pop_to_reg(dst)?,
-                Op::Call { argc } => self.call(argc)?,
+            } else if !self.pop_call() {
+                break;
             }
         }
 
