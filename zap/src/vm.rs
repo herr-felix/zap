@@ -10,64 +10,81 @@ pub type RegID = u8;
 
 #[derive(Clone)]
 pub enum Op {
-    Move { dst: RegID, src: RegID }, // Copy the content of src to dst
-    Set { dst: RegID, val: Value },  // Load the literal Val into resgister reg
+    Move { dst: RegID, src: RegID },     // Copy the content of src to dst
+    Load { dst: RegID, const_idx: u16 }, // Load the literal Val into resgister reg
     Add { a: RegID, b: RegID, dst: RegID }, // Add reg(a) with r(b) and put the result in reg(dst)
-    Push { val: Value },             // Push val on the stack
-    PushRet,                         // Push r(0) on the stack
-    Pop { dst: RegID },              // Pop a value from the stack into a register
-    Call { argc: u8 },               // Call the function at reg(0) with argc arguments
-    CondJmp(usize),                  // Jump forward n ops if reg(0) is truty
-    Jmp(usize),                      // Jump forward n ops
+    Call { dst: u8, start: u8, argc: u8 }, // Call the function at reg(0) with argc arguments
+    CondJmp(usize),                      // Jump forward n ops if reg(0) is truty
+    Jmp(usize),                          // Jump forward n ops
 }
 
 impl fmt::Debug for Op {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Op::Move { dst, src } => write!(f, "MOVE    {} {}", dst, src),
-            Op::Set { dst, val } => write!(f, "SET     {} {}", dst, val),
+            Op::Load { dst, const_idx } => write!(f, "LOAD    {} {}", dst, const_idx),
             Op::Add { a, b, dst } => write!(f, "ADD     {} {} {}", dst, a, b),
-            Op::Push { val } => write!(f, "PUSH    {}", val),
-            Op::PushRet => write!(f, "PUSHRET"),
-            Op::Pop { dst } => write!(f, "POP     {}", dst),
-            Op::Call { argc } => write!(f, "CALL    {}", argc),
+            Op::Call { dst, start, argc } => write!(f, "CALL    {} {} {}", dst, start, argc),
             Op::CondJmp(n) => write!(f, "CONDJMP {}", n),
             Op::Jmp(n) => write!(f, "JMP     {}", n),
         }
     }
 }
 
-pub type Chunk = Arc<Vec<Op>>;
+#[derive(Default, Debug)]
+pub struct Chunk {
+    pub ops: Vec<Op>,
+    pub consts: Vec<Value>,
+}
+
+struct CallFrame {
+    chunk: Arc<Chunk>,
+    pc: usize,
+    regs: Vec<Value>,
+    dst: u8,
+}
 
 pub struct VM {
     pc: usize,
-    chunk: Chunk,
-    stack: Vec<Value>,
-    call_stack: Vec<(Chunk, usize)>,
-    regs: [Value; 256],
+    chunk: Arc<Chunk>,
+    calls: Vec<CallFrame>,
+    regs: Vec<Value>,
 }
 
 impl VM {
     pub fn init() -> Self {
         VM {
             pc: 0,
-            chunk: Arc::new(Vec::new()),
-            stack: Vec::with_capacity(32),
-            call_stack: Vec::with_capacity(32),
-            regs: [(); 256].map(|_| Value::default()),
+            chunk: Arc::new(Chunk::default()),
+            calls: Vec::with_capacity(8),
+            regs: vec![Value::Nil; 256],
         }
     }
 
     #[inline(always)]
     fn get_next_op(&mut self) -> Option<Op> {
         self.pc += 1;
-        self.chunk.get(self.pc - 1).cloned()
+        self.chunk.ops.get(self.pc - 1).cloned()
+    }
+
+    fn push_call(&mut self, new_chunk: Arc<Chunk>, dst: u8) {
+        let chunk = std::mem::replace(&mut self.chunk, new_chunk);
+        self.calls.push(CallFrame {
+            dst,
+            chunk,
+            pc: self.pc,
+            regs: self.regs.clone(),
+        });
+        self.pc = 0;
     }
 
     fn pop_call(&mut self) -> bool {
-        if let Some((chunk, pc)) = self.call_stack.pop() {
-            self.pc = pc;
-            self.chunk = chunk;
+        if let Some(frame) = self.calls.pop() {
+            let ret = self.regs.swap_remove(0);
+            self.pc = frame.pc;
+            self.chunk = frame.chunk;
+            self.regs = frame.regs;
+            self.set_reg(frame.dst, ret);
             true
         } else {
             false
@@ -84,36 +101,21 @@ impl VM {
         self.regs[idx as usize].clone()
     }
 
-    #[inline(always)]
-    fn pop_to_reg(&mut self, reg: RegID) -> Result<()> {
-        if let Some(val) = self.stack.pop() {
-            self.set_reg(reg, val);
-            Ok(())
-        } else {
-            Err(error_msg("Pop to reg: Stack is empty."))
-        }
-    }
-
-    #[inline(always)]
-    fn push_ret(&mut self) {
-        let val = std::mem::take(&mut self.regs[0]);
-        self.stack.push(val);
-    }
-
-    fn call(&mut self, argc: u8) -> Result<()> {
+    fn call(&mut self, start: u8, argc: u8, dst: u8) -> Result<()> {
         // Set the chunk in reg(0) as current chunk
-        if let Value::Func(f) = self.reg(0) {
+        if let Value::Func(f) = self.reg(start) {
             match f {
                 ZapFn::Native(_, native) => {
-                    let args = &self.regs[1..=(argc as usize)];
+                    let args = &self.regs[(start as usize)..=(start as usize + argc as usize)];
                     let ret = native(args)?;
-                    self.set_reg(0, ret);
+                    self.set_reg(dst, ret);
                 }
                 ZapFn::Chunk(chunk) => {
-                    // Push the current chunk on the summary
-                    let parent_chunk = std::mem::replace(&mut self.chunk, chunk);
-                    self.call_stack.push((parent_chunk, self.pc));
-                    self.pc = 0;
+                    self.push_call(chunk, dst);
+                    // Move the args at the begining
+                    for offset in 0..(argc as usize) {
+                        self.regs.swap((start as usize) + offset, offset);
+                    }
                 }
             }
             Ok(())
@@ -127,7 +129,12 @@ impl VM {
         self.pc += n;
     }
 
-    pub fn run<E: Env>(&mut self, chunk: Chunk, _env: &mut E) -> Result<Value> {
+    #[inline(always)]
+    fn load_const(&mut self, dst: u8, idx: u16) {
+        self.set_reg(dst, self.chunk.consts[idx as usize].clone());
+    }
+
+    pub fn run<E: Env>(&mut self, chunk: Arc<Chunk>, _env: &mut E) -> Result<Value> {
         self.pc = 0;
         self.chunk = chunk;
 
@@ -138,14 +145,11 @@ impl VM {
             if let Some(op) = self.get_next_op() {
                 match op {
                     Op::Move { dst, src } => {
-                        self.regs[dst as usize] = self.regs[src as usize].clone();
+                        self.set_reg(dst, self.regs[src as usize].clone());
                     }
-                    Op::Set { dst, val } => self.set_reg(dst, val),
+                    Op::Load { dst, const_idx } => self.load_const(dst, const_idx),
                     Op::Add { a, b, dst } => self.set_reg(dst, (self.reg(a) + self.reg(b))?),
-                    Op::Push { val } => self.stack.push(val),
-                    Op::PushRet => self.push_ret(),
-                    Op::Pop { dst } => self.pop_to_reg(dst)?,
-                    Op::Call { argc } => self.call(argc)?,
+                    Op::Call { dst, start, argc } => self.call(start, argc, dst)?,
                     Op::CondJmp(n) => {
                         if self.reg(0).is_truthy() {
                             self.jump(n)

@@ -10,7 +10,7 @@ pub type Symbol = usize;
 pub type ZapList = Arc<Vec<Value>>;
 pub type Result<T> = std::result::Result<T, ZapErr>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Nil,
     Bool(bool),
@@ -96,7 +96,7 @@ pub type ZapFnNative = fn(&[Value]) -> Result<Value>;
 #[derive(Clone)]
 pub enum ZapFn {
     Native(String, ZapFnNative),
-    Chunk(Chunk),
+    Chunk(Arc<Chunk>),
 }
 
 impl ZapFn {
@@ -104,7 +104,7 @@ impl ZapFn {
         Value::Func(ZapFn::Native(name, func))
     }
 
-    pub fn from_chunk(chunk: Chunk) -> Value {
+    pub fn from_chunk(chunk: Arc<Chunk>) -> Value {
         Value::Func(ZapFn::Chunk(chunk))
     }
 }
@@ -125,8 +125,8 @@ impl std::fmt::Debug for ZapFn {
             ZapFn::Native(name, _) => {
                 write!(f, "Native func<{}>", name)
             }
-            ZapFn::Chunk(chunk) => {
-                write!(f, "Chunk <{}>", chunk.len())
+            ZapFn::Chunk(_) => {
+                write!(f, "<Chunk>")
             }
         }
     }

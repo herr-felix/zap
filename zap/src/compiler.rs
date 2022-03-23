@@ -1,7 +1,6 @@
 use crate::env::{symbols, Env};
 use crate::vm::{Chunk, Op};
 use crate::zap::{error_msg, Result, Symbol, Value, ZapList};
-use std::ops::Range;
 use std::sync::Arc;
 
 // The compiler takes the expression returned by the reader and return an array of bytecodes
@@ -20,26 +19,18 @@ enum Form {
 }
 
 struct Compiler {
-    chunk: Vec<Op>,
+    chunk: Chunk,
     forms: Vec<Form>,
-    next_available_reg: Option<u8>,
+    next_reg: u8,
     argc: u8,
-}
-
-fn is_leaf(val: &Value) -> bool {
-    !matches!(val, Value::List(l) if l.len() > 0)
-}
-
-fn list_is_leaf(list: &ZapList) -> bool {
-    list.iter().all(is_leaf)
 }
 
 impl Compiler {
     pub fn init(ast: Value) -> Self {
         Compiler {
-            chunk: Vec::new(),
+            chunk: Chunk::default(),
             forms: vec![Form::Value(ast)],
-            next_available_reg: Some(0),
+            next_reg: 0,
             argc: 0,
         }
     }
@@ -48,7 +39,7 @@ impl Compiler {
         self.forms.pop()
     }
 
-    pub fn chunk(self) -> Chunk {
+    pub fn chunk(self) -> Arc<Chunk> {
         Arc::new(self.chunk)
     }
 
@@ -56,23 +47,30 @@ impl Compiler {
         self.argc = argc;
     }
 
-    fn push(&mut self, val: Value) {
-        if let Some(dst) = self.next_available_reg {
-            self.emit(Op::Set { dst, val });
-            self.next_available_reg = Some(dst + 1);
-        } else {
-            self.emit(Op::Push { val })
-        }
+    fn load(&mut self, val: Value) -> Result<()> {
+        let const_idx = self.get_const_idx(&val)?;
+        self.emit(Op::Load {
+            dst: self.next_reg,
+            const_idx,
+        });
+        self.next_reg += 1;
+        Ok(())
     }
 
     fn emit(&mut self, op: Op) {
-        self.chunk.push(op);
+        self.chunk.ops.push(op);
     }
 
-    fn pop_range(&mut self, range: Range<u8>) {
-        for dst in range {
-            self.emit(Op::Pop { dst });
+    fn get_const_idx(&mut self, val: &Value) -> Result<u16> {
+        if let Some(idx) = self.chunk.consts.iter().position(|x| x == val) {
+            idx
+        } else {
+            let idx = self.chunk.consts.len();
+            self.chunk.consts.push(val.clone());
+            idx
         }
+        .try_into()
+        .or_else(|_| Err(error_msg("Too many constants in the constants table")))
     }
 
     pub fn eval_list(&mut self, list: ZapList) -> Result<()> {
@@ -80,10 +78,6 @@ impl Compiler {
             return Err(error_msg(
                 "A function cannot have more than 254 parameters.",
             ));
-        }
-
-        if !list_is_leaf(&list) {
-            self.next_available_reg = None;
         }
 
         match list[0] {
@@ -97,7 +91,6 @@ impl Compiler {
                     return Err(error_msg("An if form must have 3 parameters"));
                 }
                 let cond = list[1].clone();
-                self.next_available_reg = Some(0);
                 self.forms.push(Form::If(list, None, None));
                 self.forms.push(Form::Value(cond));
                 return Ok(());
@@ -114,95 +107,84 @@ impl Compiler {
         self.forms.push(Form::Value(item));
     }
 
-    pub fn eval_value(&mut self, val: Value) {
-        self.push(val);
+    pub fn eval_value(&mut self, val: Value) -> Result<()> {
+        self.load(val)?;
+        Ok(())
     }
 
-    pub fn eval_symbol<E: Env>(&mut self, s: Symbol, _env: &mut E) {
+    pub fn eval_symbol<E: Env>(&mut self, s: Symbol, _env: &mut E) -> Result<()> {
         // TODO
-        self.push(Value::Symbol(s));
+        self.load(Value::Symbol(s))?;
+        Ok(())
     }
 
-    pub fn apply(&mut self, kind: ApplyKind) {
-        let args_stacked = self.next_available_reg.is_none();
+    pub fn apply(&mut self, kind: ApplyKind) -> Result<()> {
         let mut argc = self.argc;
 
         match kind {
             ApplyKind::Call => {
+                let start = self.next_reg - argc;
                 // Arguments were pushed on the stack
-                if args_stacked {
-                    self.pop_range(argc..0_u8)
-                }
-                self.emit(Op::Call { argc });
+                self.emit(Op::Call {
+                    dst: start,
+                    start,
+                    argc,
+                });
             }
             ApplyKind::Add => {
                 argc -= 1; // The '+' symbol was not pushed, but was still counted in teh argc
                 if argc == 0 {
-                    self.emit(Op::Set {
-                        dst: 0,
-                        val: Value::Number(0.0),
-                    });
-                } else if argc == 1 {
-                    if args_stacked {
-                        self.emit(Op::Pop { dst: 0 });
-                    }
-                } else {
-                    if args_stacked {
-                        self.emit(Op::Pop { dst: 0 });
-                    }
+                    let const_idx = self.get_const_idx(&Value::Number(0.0))?;
+                    self.emit(Op::Load { dst: 0, const_idx });
+                } else if argc > 1 {
                     argc -= 1;
-
                     while argc > 0 {
-                        if args_stacked {
-                            self.emit(Op::Pop { dst: 1 });
-                            self.emit(Op::Add { a: 0, b: 1, dst: 0 });
-                        } else {
-                            self.emit(Op::Add {
-                                a: 0,
-                                b: argc,
-                                dst: 0,
-                            });
-                        }
+                        self.emit(Op::Add {
+                            a: 0,
+                            b: argc,
+                            dst: 0,
+                        });
                         argc -= 1;
                     }
                 }
             }
         }
-        if matches!(self.forms.last(), Some(Form::List(_, _))) {
-            self.emit(Op::PushRet);
-        }
+        Ok(())
     }
 
     pub fn then_branch(&mut self, args: ZapList) {
         let branch = args[2].clone();
-        self.next_available_reg = Some(0);
-        self.forms
-            .push(Form::If(args, Some(std::mem::take(&mut self.chunk)), None));
+        self.forms.push(Form::If(
+            args,
+            Some(std::mem::take(&mut self.chunk.ops)),
+            None,
+        ));
         self.forms.push(Form::Value(branch));
+        self.next_reg = 0;
     }
 
     pub fn else_branch(&mut self, args: ZapList, chunk: Vec<Op>) {
         let branch = args[3].clone();
-        self.next_available_reg = Some(0);
         self.forms.push(Form::If(
             args,
             Some(chunk),
-            Some(std::mem::take(&mut self.chunk)),
+            Some(std::mem::take(&mut self.chunk.ops)),
         ));
         self.forms.push(Form::Value(branch));
+        self.next_reg = 0;
     }
 
     pub fn combine_branches(&mut self, chunk: Vec<Op>, then_branch: Vec<Op>) {
-        let else_branch = std::mem::replace(&mut self.chunk, chunk);
+        let else_branch = std::mem::replace(&mut self.chunk.ops, chunk);
 
         self.emit(Op::CondJmp(1 + else_branch.len()));
-        self.chunk.extend(else_branch);
+        self.chunk.ops.extend(else_branch);
         self.emit(Op::CondJmp(then_branch.len()));
-        self.chunk.extend(then_branch);
+        self.chunk.ops.extend(then_branch);
     }
 }
 
-pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Chunk> {
+pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
     let mut compiler = Compiler::init(ast);
 
     while let Some(form) = compiler.get_form() {
@@ -212,11 +194,11 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Chunk> {
                     if list.len() > 0 {
                         compiler.eval_list(list)?;
                     } else {
-                        compiler.eval_value(Value::List(list))
+                        compiler.eval_value(Value::List(list))?
                     }
                 }
-                Value::Symbol(s) => compiler.eval_symbol(s, env),
-                atom => compiler.eval_value(atom),
+                Value::Symbol(s) => compiler.eval_symbol(s, env)?,
+                atom => compiler.eval_value(atom)?,
             },
             Form::List(list, idx) => {
                 if list.len() > idx.into() {
@@ -226,7 +208,7 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Chunk> {
                 }
             }
             Form::Apply(kind) => {
-                compiler.apply(kind);
+                compiler.apply(kind)?;
             }
             Form::If(args, chunk, then_branch) => {
                 match (chunk, then_branch) {
