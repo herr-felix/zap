@@ -76,7 +76,6 @@ impl Compiler {
                 "A function cannot have more than 254 parameters.",
             ));
         }
-
         self.next_available_reg = None;
         // TODO: Check if all elements of the list are atom. If so, set registers instead of
         // pushing up the stack.
@@ -103,9 +102,11 @@ impl Compiler {
         self.push(val);
     }
 
-    pub fn eval_symbol<E: Env>(&mut self, _s: Symbol, _env: &mut E) {
+    pub fn eval_symbol<E: Env>(&mut self, s: Symbol, _env: &mut E) {
         // TODO
+        self.push(Value::Symbol(s));
     }
+
     pub fn apply(&mut self, kind: ApplyKind) {
         let args_stacked = self.next_available_reg.is_none();
         let mut argc = self.argc;
@@ -118,10 +119,8 @@ impl Compiler {
                 }
                 self.emit(Op::Call { argc });
             }
-
             ApplyKind::Add => {
                 argc -= 1; // The '+' symbol was not pushed, but was still counted in teh argc
-
                 if argc == 0 {
                     self.emit(Op::Set {
                         dst: 0,

@@ -1,3 +1,4 @@
+use std::fmt;
 use std::rc::Rc;
 
 use crate::env::Env;
@@ -7,7 +8,7 @@ use crate::zap::{error_msg, Result, Value, ZapFn};
 
 pub type RegID = u8;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Op {
     Move { dst: RegID, src: RegID }, // Copy the content of src to dst
     Set { dst: RegID, val: Value },  // Load the literal Val into resgister reg
@@ -16,6 +17,20 @@ pub enum Op {
     PushRet,                         // Push r(0) on the stack
     Pop { dst: RegID },              // Pop a value from the stack into a register
     Call { argc: u8 },               // Call the function at reg(0) with argc arguments
+}
+
+impl fmt::Debug for Op {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Op::Move { dst, src } => write!(f, "MOVE    {} {}", dst, src),
+            Op::Set { dst, val } => write!(f, "SET     {} {}", dst, val),
+            Op::Add { a, b, dst } => write!(f, "ADD     {} {} {}", dst, a, b),
+            Op::Push { val } => write!(f, "PUSH    {}", val),
+            Op::PushRet => write!(f, "PUSHRET"),
+            Op::Pop { dst } => write!(f, "POP     {}", dst),
+            Op::Call { argc } => write!(f, "CALL    {}", argc),
+        }
+    }
 }
 
 pub type Chunk = Rc<Vec<Op>>;
@@ -41,7 +56,6 @@ impl VM {
 
     fn get_next_op(&mut self) -> Option<Op> {
         self.pc += 1;
-
         // Check if we are at the end of the current chunk. If so, pop a chunk off the stack
         // and set it back as the current chunk. If the stack is empty, we are done running.
         if self.chunk.len() < self.pc {
