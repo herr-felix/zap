@@ -1,8 +1,9 @@
+pub mod compiler;
 pub mod env;
-pub mod eval;
 pub mod printer;
 pub mod reader;
-pub mod types;
+pub mod vm;
+pub mod zap;
 
 pub trait Evaluator {
     fn eval<E: env::Env>(&mut self, env: &mut E);
@@ -10,31 +11,33 @@ pub trait Evaluator {
 
 #[cfg(test)]
 mod tests {
+    use crate::compiler::compile;
     use crate::env::SandboxEnv;
-    use crate::eval::Evaluator;
     use crate::reader::Reader;
-    use crate::types::String;
+    use crate::vm::VM;
+    use crate::zap::String;
 
     fn run_exp(src: &str) -> String {
         let mut reader = Reader::new();
-        reader.tokenize(src);
 
+        reader.tokenize(src);
         reader.flush_token();
 
-        let env = SandboxEnv::default();
-        let mut session = Evaluator::new(env);
+        let mut env = SandboxEnv::default();
+        let mut vm = VM::init();
 
-        let mut form = reader.read_form(session.get_env()).unwrap();
-        let mut res = session.eval(form.unwrap()).unwrap();
+        let mut ast = reader.read_ast(&mut env).unwrap();
+        let mut chunk = compile(ast.unwrap(), &mut env).unwrap();
+        let mut res = vm.run(chunk, &mut env).unwrap();
 
         loop {
-            form = reader.read_form(session.get_env()).unwrap();
-            if form.is_none() {
-                return String::from(res.pr_str(session.get_env()))
+            ast = reader.read_ast(&mut env).unwrap();
+            if ast.is_none() {
+                return String::from(res.to_string(&mut env));
             }
-            res = session.eval(form.unwrap()).unwrap();
+            chunk = compile(ast.unwrap(), &mut env).unwrap();
+            res = vm.run(chunk, &mut env).unwrap();
         }
-
     }
 
     #[test]
@@ -43,68 +46,16 @@ mod tests {
     }
 
     #[test]
-    fn eval_if() {
-        assert_eq!(run_exp("(if 12 false true)"), "false");
+    fn eval_empty_list() {
+        assert_eq!(run_exp("()"), "()");
     }
 
     #[test]
-    fn eval_quoted_symbol() {
-        assert_eq!(run_exp("'a"), "a");
-    }
-
-    #[test]
-    fn eval_quoted_list() {
-        assert_eq!(run_exp("'(1 2 3)"), "(1 2 3)");
-    }
-
-    #[test]
-    fn eval_quasiquote_list() {
-        assert_eq!(run_exp("(define x '(2 3)) `(1 x 4)"), "(1 x 4)");
-    }
-
-    #[test]
-    fn eval_unquote_list() {
-        assert_eq!(run_exp("(define D '(2 3)) `(1 ~D 4)"), "(1 (2 3) 4)");
-    }
-
-    #[test]
-    fn eval_splice_unquote_list() {
-        assert_eq!(run_exp(r#"(define c '(1 "b" "d"))"#), r#"(1 "b" "d")"#);
-        assert_eq!(
-            run_exp(r#"(define c '(1 "b" "d")) `(1 c 3)"#),
-            r#"(1 c 3)"#
-        );
-        assert_eq!(
-            run_exp(r#"(define c '(1 "b" "d")) `(1 ~@c 3)"#),
-            r#"(1 1 "b" "d" 3)"#
-        );
-        assert_eq!(
-            run_exp(r#"(define c '(1 "b" "d")) `(1 ~@c)"#),
-            r#"(1 1 "b" "d")"#
-        );
-        assert_eq!(
-            run_exp(r#"(define c '(1 "b" "d")) `(~@c 2)"#),
-            r#"(1 "b" "d" 2)"#
-        );
-        assert_eq!(
-            run_exp(r#"(define c '(1 "b" "d")) `(~@c ~@c)"#),
-            r#"(1 "b" "d" 1 "b" "d")"#
-        );
-        assert_eq!(run_exp("(define x '(2 3)) `(1 ~@x 4)"), "(1 2 3 4)");
-    }
-
-    #[test]
-    fn eval_let_quote_list() {
-        assert_eq!(run_exp("(let (x '(2 3)) x)"), "(2 3)");
-    }
-
-    #[test]
-    fn eval_let_unquote_list() {
-        assert_eq!(run_exp("(let (x 0) `~x)"), "0");
-    }
-
-    #[test]
-    fn eval_returned_function_with_lexical_scoping() {
-        assert_eq!(run_exp("(define same-maker (fn (x) (fn () x))) (define same-4 (same-maker 4)) (same-4)"), "4");
+    fn add_numbers() {
+        assert_eq!(run_exp("(+)"), "0");
+        assert_eq!(run_exp("(+ 8)"), "8");
+        assert_eq!(run_exp("(+ 1 2)"), "3");
+        assert_eq!(run_exp("(+ 1 2 2)"), "5");
+        assert_eq!(run_exp("(+ 1 2 3 (+ 4 2))"), "12");
     }
 }

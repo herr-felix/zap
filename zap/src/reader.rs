@@ -1,12 +1,10 @@
-use smartstring::alias::String;
-
 use std::collections::VecDeque;
 use std::iter::Peekable;
 use std::num::ParseFloatError;
 use std::str::Chars;
 
 use crate::env::Env;
-use crate::types::{error, ZapErr, ZapExp};
+use crate::zap::{error_msg, String, Value, ZapErr};
 
 /* Tokenizer */
 
@@ -38,7 +36,7 @@ impl std::fmt::Display for Token {
 }
 
 enum ParentForm {
-    List(Vec<ZapExp>),
+    List(Vec<Value>),
     Quote,
     Quasiquote,
     Unquote,
@@ -47,6 +45,7 @@ enum ParentForm {
 }
 
 pub struct Reader {
+    lines: u32,
     tokens: VecDeque<Token>,
     token_buf: std::string::String,
     stack: Vec<ParentForm>,
@@ -61,6 +60,7 @@ impl Default for Reader {
 impl Reader {
     pub fn new() -> Reader {
         Reader {
+            lines: 1,
             tokens: VecDeque::new(),
             token_buf: std::string::String::with_capacity(32),
             stack: Vec::with_capacity(64),
@@ -90,6 +90,10 @@ impl Reader {
                     '\\' => {
                         escaped = true;
                         continue;
+                    }
+                    '\n' => {
+                        self.lines += 1;
+                        self.token_buf.push(ch)
                     }
                     _ => self.token_buf.push(ch),
                 }
@@ -136,7 +140,11 @@ impl Reader {
         #[allow(clippy::while_let_on_iterator)]
         while let Some(ch) = chars.next() {
             match ch {
-                ' ' | '\n' | '\t' | ',' => {
+                '\n' => {
+                    self.lines += 1;
+                    self.flush_token();
+                }
+                ' ' | '\t' | ',' => {
                     self.flush_token();
                 }
                 '(' => {
@@ -200,19 +208,19 @@ impl Reader {
         }
     }
 
-    fn read_atom<E: Env>(mut atom: std::string::String, env: &mut E) -> ZapExp {
+    fn read_atom<E: Env>(mut atom: std::string::String, env: &mut E) -> Value {
         match atom.as_ref() {
-            "nil" => ZapExp::Nil,
-            "true" => ZapExp::Bool(true),
-            "false" => ZapExp::Bool(false),
+            "nil" => Value::Nil,
+            "true" => Value::Bool(true),
+            "false" => Value::Bool(false),
             _ => {
                 if atom.starts_with('"') {
-                    return ZapExp::Str(String::from(atom.split_off(1)));
+                    return Value::Str(String::from(atom.split_off(1)));
                 }
 
                 let potential_float: Result<f64, ParseFloatError> = atom.parse();
                 match potential_float {
-                    Ok(v) => ZapExp::Number(v),
+                    Ok(v) => Value::Number(v),
                     Err(_) => env.reg_symbol(String::from(atom)),
                 }
             }
@@ -221,16 +229,16 @@ impl Reader {
 
     fn read_error(&mut self, msg: &str) -> ZapErr {
         self.stack.truncate(0);
-        error(msg)
+        error_msg(msg)
     }
 
     #[inline(always)]
-    fn expand_reader_macro(&mut self, form: ZapExp, exp: ZapExp) {
+    fn expand_reader_macro(&mut self, form: Value, exp: Value) {
         self.tokens.push_front(Token::ListEnd);
         self.stack.push(ParentForm::List(vec![form, exp]));
     }
 
-    pub fn read_form<E: Env>(&mut self, env: &mut E) -> Result<Option<ZapExp>, ZapErr> {
+    pub fn read_ast<E: Env>(&mut self, env: &mut E) -> Result<Option<Value>, ZapErr> {
         while let Some(token) = self.tokens.pop_front() {
             let exp = match token {
                 Token::Atom(s) => Reader::read_atom(s, env),
@@ -259,7 +267,7 @@ impl Reader {
                     continue;
                 }
                 Token::ListEnd => match self.stack.pop() {
-                    Some(ParentForm::List(seq)) => ZapExp::List(ZapExp::new_list(seq)),
+                    Some(ParentForm::List(seq)) => Value::List(Value::new_list(seq)),
                     Some(ParentForm::Quote) => return Err(self.read_error("Cannot quote a ')'")),
                     Some(ParentForm::Quasiquote) => {
                         return Err(self.read_error("Cannot quasiquote a ')'"))
