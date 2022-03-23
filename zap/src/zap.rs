@@ -22,7 +22,7 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn to_string<E: Env>(&self, env: &mut E) -> std::string::String {
+    pub fn to_string<E: Env>(&self, _env: &mut E) -> std::string::String {
         match self {
             Value::Func(_) => "Func<>".to_string(),
             x => format!("{}", x),

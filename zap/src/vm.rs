@@ -65,7 +65,8 @@ impl VM {
 
     fn pop_to_reg(&mut self, reg: RegID) -> Result<()> {
         if let Some(val) = self.stack.pop() {
-            Ok(self.set_reg(reg, val))
+            self.set_reg(reg, val);
+            Ok(())
         } else {
             Err(error_msg("Pop to reg: Stack is empty."))
         }
@@ -98,7 +99,7 @@ impl VM {
         }
     }
 
-    pub fn run<E: Env>(&mut self, chunk: Chunk, env: &mut E) -> Result<Value> {
+    pub fn run<E: Env>(&mut self, chunk: Chunk, _env: &mut E) -> Result<Value> {
         self.pc = 0;
         self.chunk = chunk;
         dbg!(&self.chunk);

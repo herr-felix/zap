@@ -46,6 +46,17 @@ mod tests {
     }
 
     #[test]
+    fn eval_string() {
+        assert_eq!(run_exp("\"test\""), "\"test\"");
+    }
+
+    #[test]
+    fn eval_bool() {
+        assert_eq!(run_exp("false"), "false");
+        assert_eq!(run_exp("true"), "true");
+    }
+
+    #[test]
     fn eval_empty_list() {
         assert_eq!(run_exp("()"), "()");
     }

@@ -1,6 +1,7 @@
 use crate::env::{symbols, Env};
 use crate::vm::{Chunk, Op};
 use crate::zap::{error_msg, Result, Symbol, Value, ZapList};
+use std::ops::Range;
 use std::rc::Rc;
 
 // The compiler takes the expression returned by the reader and return an array of bytecodes
@@ -26,12 +27,9 @@ struct Compiler {
 
 impl Compiler {
     pub fn init(ast: Value) -> Self {
-        let mut forms = Vec::new();
-        forms.push(Form::Value(ast));
-
         Compiler {
             chunk: Vec::new(),
-            forms,
+            forms: vec![Form::Value(ast)],
             next_available_reg: Some(0),
             argc: 0,
         }
@@ -51,10 +49,24 @@ impl Compiler {
 
     fn push(&mut self, val: Value) {
         if let Some(dst) = self.next_available_reg {
-            self.chunk.push(Op::Set { dst, val });
+            self.emit(Op::Set { dst, val });
             self.next_available_reg = Some(dst + 1);
         } else {
-            self.chunk.push(Op::Push { val })
+            self.emit(Op::Push { val })
+        }
+    }
+
+    fn is_root_call(&self) -> bool {
+        !self.forms.is_empty()
+    }
+
+    fn emit(&mut self, op: Op) {
+        self.chunk.push(op);
+    }
+
+    fn pop_range(&mut self, range: Range<u8>) {
+        for dst in range {
+            self.emit(Op::Pop { dst });
         }
     }
 
@@ -70,14 +82,11 @@ impl Compiler {
         // pushing up the stack.
         //
         match list[0] {
-            Value::Symbol(s) => match s {
-                symbols::PLUS => {
-                    self.forms.push(Form::Apply(ApplyKind::Add));
-                    self.forms.push(Form::List(list, 1));
-                    return Ok(());
-                }
-                _ => self.forms.push(Form::Apply(ApplyKind::Call)),
-            },
+            Value::Symbol(symbols::PLUS) => {
+                self.forms.push(Form::Apply(ApplyKind::Add));
+                self.forms.push(Form::List(list, 1));
+                return Ok(());
+            }
             _ => self.forms.push(Form::Apply(ApplyKind::Call)),
         }
         self.forms.push(Form::List(list, 0));
@@ -94,44 +103,41 @@ impl Compiler {
         self.push(val);
     }
 
-    pub fn eval_symbol<E: Env>(&mut self, s: Symbol, env: &mut E) {
+    pub fn eval_symbol<E: Env>(&mut self, _s: Symbol, _env: &mut E) {
         // TODO
     }
-
     pub fn apply(&mut self, kind: ApplyKind) {
-        let args_on_stack = self.next_available_reg.is_none();
+        let args_stacked = self.next_available_reg.is_none();
         let mut argc = self.argc;
 
         match kind {
             ApplyKind::Call => {
                 // Arguments were pushed on the stack
-                if args_on_stack {
-                    for dst in argc..0_u8 {
-                        self.chunk.push(Op::Pop { dst });
-                    }
+                if args_stacked {
+                    self.pop_range(argc..0_u8)
                 }
-                self.chunk.push(Op::Call { argc });
+                self.emit(Op::Call { argc });
             }
+
             ApplyKind::Add => {
                 argc -= 1; // The '+' symbol was not pushed, but was still counted in teh argc
-                dbg!(argc);
 
                 if argc == 0 {
-                    self.chunk.push(Op::Set {
+                    self.emit(Op::Set {
                         dst: 0,
                         val: Value::Number(0.0),
                     });
                 } else {
-                    if args_on_stack {
-                        self.chunk.push(Op::Pop { dst: 0 });
+                    if args_stacked {
+                        self.emit(Op::Pop { dst: 0 });
                         argc -= 1;
                     }
                     while argc > 0 {
-                        if args_on_stack {
-                            self.chunk.push(Op::Pop { dst: 1 });
-                            self.chunk.push(Op::Add { a: 0, b: 1, dst: 0 });
+                        if args_stacked {
+                            self.emit(Op::Pop { dst: 1 });
+                            self.emit(Op::Add { a: 0, b: 1, dst: 0 });
                         } else {
-                            self.chunk.push(Op::Add {
+                            self.emit(Op::Add {
                                 a: 0,
                                 b: argc - 1,
                                 dst: 0,
@@ -142,8 +148,8 @@ impl Compiler {
                 }
             }
         }
-        if self.forms.len() > 0 {
-            self.chunk.push(Op::PushRet);
+        if self.is_root_call() {
+            self.emit(Op::PushRet);
         }
     }
 }
