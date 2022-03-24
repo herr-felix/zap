@@ -10,12 +10,12 @@ pub type RegID = u8;
 
 #[derive(Clone)]
 pub enum Op {
-    Move { dst: RegID, src: RegID },     // Copy the content of src to dst
-    Load { dst: RegID, const_idx: u16 }, // Load the literal Val into resgister reg
+    Move { dst: RegID, src: RegID },        // Copy the content of src to dst
+    Load { dst: RegID, const_idx: u16 },    // Load the literal Val into resgister reg
     Add { a: RegID, b: RegID, dst: RegID }, // Add reg(a) with r(b) and put the result in reg(dst)
-    Call { dst: u8, start: u8, argc: u8 }, // Call the function at reg(0) with argc arguments
-    CondJmp(usize),                      // Jump forward n ops if reg(0) is truty
-    Jmp(usize),                          // Jump forward n ops
+    Call { dst: u8, start: u8, argc: u8 },  // Call the function at reg(0) with argc arguments
+    CondJmp{reg: RegID, n: u16},            // Jump forward n ops if reg(0) is truty
+    Jmp(u16),                               // Jump forward n ops
 }
 
 impl fmt::Debug for Op {
@@ -25,7 +25,7 @@ impl fmt::Debug for Op {
             Op::Load { dst, const_idx } => write!(f, "LOAD    {} {}", dst, const_idx),
             Op::Add { a, b, dst } => write!(f, "ADD     {} {} {}", dst, a, b),
             Op::Call { dst, start, argc } => write!(f, "CALL    {} {} {}", dst, start, argc),
-            Op::CondJmp(n) => write!(f, "CONDJMP {}", n),
+            Op::CondJmp{reg, n} => write!(f, "CONDJMP {} {}", reg, n),
             Op::Jmp(n) => write!(f, "JMP     {}", n),
         }
     }
@@ -40,7 +40,7 @@ pub struct Chunk {
 struct CallFrame {
     chunk: Arc<Chunk>,
     pc: usize,
-    regs: Vec<Value>,
+    regs: [Value; 256],
     dst: u8,
 }
 
@@ -48,7 +48,7 @@ pub struct VM {
     pc: usize,
     chunk: Arc<Chunk>,
     calls: Vec<CallFrame>,
-    regs: Vec<Value>,
+    regs: [Value; 256],
 }
 
 impl VM {
@@ -57,7 +57,7 @@ impl VM {
             pc: 0,
             chunk: Arc::new(Chunk::default()),
             calls: Vec::with_capacity(8),
-            regs: vec![Value::Nil; 256],
+            regs: [(); 256].map(|_| Value::Nil),
         }
     }
 
@@ -80,7 +80,7 @@ impl VM {
 
     fn pop_call(&mut self) -> bool {
         if let Some(frame) = self.calls.pop() {
-            let ret = self.regs.swap_remove(0);
+            let ret = self.regs[0].clone();
             self.pc = frame.pc;
             self.chunk = frame.chunk;
             self.regs = frame.regs;
@@ -105,9 +105,9 @@ impl VM {
         // Set the chunk in reg(0) as current chunk
         if let Value::Func(f) = self.reg(start) {
             match f {
-                ZapFn::Native(_, native) => {
+                ZapFn::Native(f) => {
                     let args = &self.regs[(start as usize)..=(start as usize + argc as usize)];
-                    let ret = native(args)?;
+                    let ret = (f.func)(args)?;
                     self.set_reg(dst, ret);
                 }
                 ZapFn::Chunk(chunk) => {
@@ -125,8 +125,8 @@ impl VM {
     }
 
     #[inline(always)]
-    fn jump(&mut self, n: usize) {
-        self.pc += n;
+    fn jump(&mut self, n: u16) {
+        self.pc += n as usize;
     }
 
     #[inline(always)]
@@ -150,8 +150,8 @@ impl VM {
                     Op::Load { dst, const_idx } => self.load_const(dst, const_idx),
                     Op::Add { a, b, dst } => self.set_reg(dst, (self.reg(a) + self.reg(b))?),
                     Op::Call { dst, start, argc } => self.call(start, argc, dst)?,
-                    Op::CondJmp(n) => {
-                        if self.reg(0).is_truthy() {
+                    Op::CondJmp{reg, n} => {
+                        if self.reg(reg).is_truthy() {
                             self.jump(n)
                         }
                     }

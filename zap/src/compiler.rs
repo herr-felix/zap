@@ -174,13 +174,19 @@ impl Compiler {
         self.next_reg = 0;
     }
 
-    pub fn combine_branches(&mut self, chunk: Vec<Op>, then_branch: Vec<Op>) {
+    pub fn combine_branches(&mut self, chunk: Vec<Op>, then_branch: Vec<Op>) -> Result<()> {
+        self.next_reg = 0;
         let else_branch = std::mem::replace(&mut self.chunk.ops, chunk);
 
-        self.emit(Op::CondJmp(1 + else_branch.len()));
+        let else_jump = (1 + else_branch.len()).try_into().or_else(|_| Err(error_msg("Else branch jump is too big.")))?;
+        self.emit(Op::CondJmp{reg: self.next_reg, n: else_jump});
         self.chunk.ops.extend(else_branch);
-        self.emit(Op::CondJmp(then_branch.len()));
+
+        let then_jump = then_branch.len().try_into().or_else(|_| Err(error_msg("Then branch jump is too big.")))?;
+        self.emit(Op::Jmp(then_jump));
         self.chunk.ops.extend(then_branch);
+
+        Ok(())
     }
 }
 
@@ -222,7 +228,7 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
                     }
                     (Some(chunk), Some(then_branch)) => {
                         // Combine the branches in the chunk
-                        compiler.combine_branches(chunk, then_branch);
+                        compiler.combine_branches(chunk, then_branch)?;
                     }
                     _ => {}
                 }

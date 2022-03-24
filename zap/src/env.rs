@@ -1,4 +1,4 @@
-use crate::zap::{error_msg, Result, String, Symbol, Value, ZapFn, ZapFnNative};
+use crate::zap::{error_msg, Result, String, Symbol, Value, ZapFn};
 use fxhash::{FxHashMap, FxHashSet};
 
 type Scope = FxHashMap<Symbol, Value>;
@@ -41,7 +41,7 @@ pub trait Env {
     fn set_global(&mut self, key: &Value, val: &Value) -> Result<()>;
     fn reg_symbol(&mut self, s: String) -> Value;
     fn get_symbol(&self, key: Symbol) -> Result<String>;
-    fn reg_fn(&mut self, symbol: &str, f: ZapFnNative);
+    fn reg_fn(&mut self, symbol: &str, f: fn(&[Value]) -> Result<Value>);
 }
 
 pub struct SandboxEnv {
@@ -146,7 +146,7 @@ impl Env for SandboxEnv {
             .ok_or_else(|| error_msg(format!("No known symbol for id={}", id).as_str()))
     }
 
-    fn reg_fn(&mut self, symbol: &str, f: ZapFnNative) {
+    fn reg_fn(&mut self, symbol: &str, f: fn(&[Value]) -> Result<Value>) {
         if let Value::Symbol(id) = self.reg_symbol(String::from(symbol)) {
             self.scope
                 .insert(id, ZapFn::native(String::from(symbol), f));

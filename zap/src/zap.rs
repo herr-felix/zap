@@ -91,17 +91,20 @@ pub fn error_msg(msg: &str) -> ZapErr {
 
 // ZapFn
 
-pub type ZapFnNative = fn(&[Value]) -> Result<Value>;
+pub struct ZapFnNative {
+    pub name: String,
+    pub func: fn(&[Value]) -> Result<Value>,
+}
 
 #[derive(Clone)]
 pub enum ZapFn {
-    Native(String, ZapFnNative),
+    Native(Arc<ZapFnNative>),
     Chunk(Arc<Chunk>),
 }
 
 impl ZapFn {
-    pub fn native(name: String, func: ZapFnNative) -> Value {
-        Value::Func(ZapFn::Native(name, func))
+    pub fn native(name: String, func: fn(&[Value]) -> Result<Value>) -> Value {
+        Value::Func(ZapFn::Native(Arc::new(ZapFnNative{name, func})))
     }
 
     pub fn from_chunk(chunk: Arc<Chunk>) -> Value {
@@ -112,7 +115,7 @@ impl ZapFn {
 impl PartialEq for ZapFn {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (ZapFn::Native(a, _), ZapFn::Native(b, _)) => a == b,
+            (ZapFn::Native(a), ZapFn::Native(b)) => a.name == b.name,
             (ZapFn::Chunk(a), ZapFn::Chunk(b)) => Arc::ptr_eq(a, b),
             (_, _) => false,
         }
@@ -122,8 +125,8 @@ impl PartialEq for ZapFn {
 impl std::fmt::Debug for ZapFn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ZapFn::Native(name, _) => {
-                write!(f, "Native func<{}>", name)
+            ZapFn::Native(_) => {
+                write!(f, "Native func")
             }
             ZapFn::Chunk(_) => {
                 write!(f, "<Chunk>")
