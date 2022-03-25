@@ -2,6 +2,7 @@ use crate::env::{symbols, Env};
 use crate::vm::{Chunk, Op, RegID};
 use crate::zap::{error_msg, Result, Symbol, Value, ZapList};
 use std::sync::Arc;
+use std::cmp::max;
 
 // The compiler takes the expression returned by the reader and return an array of bytecodes
 // which can be executed by the VM.
@@ -51,13 +52,18 @@ impl<'a, E: Env> Compiler<'a, E> {
         self.argc = argc;
     }
 
+    fn bumb_dst(&mut self) {
+        self.dst += 1;
+        self.chunk.max_regs = max(self.dst, self.chunk.max_regs);
+    }
+
     fn load(&mut self, val: &Value) -> Result<()> {
         let const_idx = self.get_const_idx(val)?;
         self.emit(Op::Load {
             dst: self.dst,
             const_idx,
         });
-        self.dst += 1;
+        self.bumb_dst();
         Ok(())
     }
 
@@ -146,7 +152,8 @@ impl<'a, E: Env> Compiler<'a, E> {
     }
 
     pub fn eval_define(&mut self, key: &Value, dst: RegID) -> Result<()> {
-        self.dst = dst + 1;
+        self.dst = dst;
+        self.bumb_dst();
         // The "value" should be in reg(dst)
         self.load(key)?;
         self.emit(Op::Define { key: dst + 1, dst });

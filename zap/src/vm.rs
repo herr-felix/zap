@@ -42,12 +42,13 @@ impl fmt::Debug for Op {
 pub struct Chunk {
     pub ops: Vec<Op>,
     pub consts: Vec<Value>,
+    pub max_regs: RegID,
 }
 
 struct CallFrame {
     chunk: Arc<Chunk>,
     pc: usize,
-    regs: Regs,
+    saved_regs: Regs,
     dst: u8,
 }
 
@@ -82,8 +83,8 @@ impl VM {
         let chunk = std::mem::replace(&mut self.chunk, new_chunk);
         self.calls.push(CallFrame {
             dst,
+            saved_regs: self.regs[0..=(chunk.max_regs as usize)].to_vec(),
             chunk,
-            regs: self.regs.clone(),
             pc: self.pc,
         });
         self.pc = 0;
@@ -93,8 +94,10 @@ impl VM {
         if let Some(frame) = self.calls.pop() {
             let ret = self.regs[0].clone();
             self.pc = frame.pc;
+            for i in 0..=frame.saved_regs.len() {
+                self.regs[i] = frame.saved_regs[i].clone();
+            }
             self.chunk = frame.chunk;
-            self.regs = frame.regs;
             self.set_reg(frame.dst, ret);
             true
         } else {

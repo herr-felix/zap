@@ -14,8 +14,8 @@ pub mod tests {
     use crate::compiler::compile;
     use crate::env::SandboxEnv;
     use crate::reader::Reader;
-    use crate::vm::VM;
-    use crate::zap::{Result, String};
+    use crate::vm::{Op, VM};
+    use crate::zap::{Result, String, Value, ZapErr};
 
     pub fn run_exp(src: &str, mut env: SandboxEnv) -> Result<String> {
         let mut reader = Reader::new();

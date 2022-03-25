@@ -51,6 +51,7 @@ pub mod tests {
         test_exp_core("(false? 12)", "false");
         test_exp_core("(false? true)", "false");
         test_exp_core("(false? ())", "false");
+        test_exp_core("(false? (false? true))", "true");
     }
 
     #[test]
