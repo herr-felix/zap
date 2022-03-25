@@ -97,4 +97,10 @@ mod tests {
     fn eval_nested() {
         assert_eq!(run_exp("(+ 1 2 3 (if false 5 (+ 4 2)))"), "12");
     }
+
+    #[test]
+    fn eval_do() {
+        assert_eq!(run_exp("(do 1 2 3)"), "3");
+        assert_eq!(run_exp("(do 1 (+ 1 2 3) (if false 2 4))"), "4");
+    }
 }

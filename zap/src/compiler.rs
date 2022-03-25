@@ -15,7 +15,8 @@ enum Form {
     Value(Value),
     List(ZapList, u8),
     Apply(ApplyKind, RegID),
-    If(ZapList, u8, Option<Vec<Op>>, Option<Vec<Op>>),
+    If(ZapList, RegID, Option<Vec<Op>>, Option<Vec<Op>>),
+    Do(ZapList, u8, RegID),
 }
 
 struct Compiler {
@@ -84,7 +85,12 @@ impl Compiler {
             Value::Symbol(symbols::PLUS) => {
                 self.forms.push(Form::Apply(ApplyKind::Add, self.dst));
                 self.forms.push(Form::List(list, 1));
-                return Ok(());
+            }
+            Value::Symbol(symbols::DO) => {
+                if list.len() < 2 {
+                    return Err(error_msg("A do form must contains at least 1 parameter"));
+                }
+                self.forms.push(Form::Do(list, 1, self.dst));
             }
             Value::Symbol(symbols::IF) => {
                 if list.len() != 4 {
@@ -93,11 +99,12 @@ impl Compiler {
                 let cond = list[1].clone();
                 self.forms.push(Form::If(list, self.dst, None, None));
                 self.forms.push(Form::Value(cond));
-                return Ok(());
             }
-            _ => self.forms.push(Form::Apply(ApplyKind::Call, self.dst)),
+            _ => {
+                self.forms.push(Form::Apply(ApplyKind::Call, self.dst));
+                self.forms.push(Form::List(list, 0));
+            }
         }
-        self.forms.push(Form::List(list, 0));
         Ok(())
     }
 
@@ -105,6 +112,15 @@ impl Compiler {
         let item = list[idx as usize].clone();
         self.forms.push(Form::List(list, idx + 1));
         self.forms.push(Form::Value(item));
+    }
+
+    pub fn eval_next_in_do(&mut self, list: ZapList, idx: u8, dst: RegID) {
+        if list.len() > idx.into() {
+            let item = list[idx as usize].clone();
+            self.forms.push(Form::Do(list, idx + 1, dst));
+            self.forms.push(Form::Value(item));
+        }
+        self.dst = dst;
     }
 
     pub fn eval_value(&mut self, val: Value) -> Result<()> {
@@ -248,6 +264,9 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
                     }
                     _ => {}
                 }
+            }
+            Form::Do(list, idx, start) => {
+                compiler.eval_next_in_do(list, idx, start);
             }
         }
     }

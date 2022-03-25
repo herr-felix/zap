@@ -2,8 +2,8 @@ mod repl;
 
 //#[cfg(not(target_env = "msvc"))]
 //use tikv_jemallocator::Jemalloc;
-#[global_allocator]
-static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+//#[global_allocator]
+//static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
 use tokio::net::TcpListener;
 
