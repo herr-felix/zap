@@ -71,7 +71,11 @@ impl VM {
     #[inline(always)]
     fn get_next_op(&mut self) -> Option<Op> {
         self.pc += 1;
-        self.chunk.ops.get(self.pc - 1).cloned()
+        if self.chunk.ops.len() >= self.pc {
+            Some(self.chunk.ops[self.pc - 1].clone())
+        } else {
+            None
+        }
     }
 
     fn push_call(&mut self, new_chunk: Arc<Chunk>, dst: u8) {
@@ -113,7 +117,11 @@ impl VM {
         if let Value::Func(f) = self.reg(start) {
             match f {
                 ZapFn::Native(f) => {
-                    let args = &self.regs[(start as usize)..=(start as usize + argc as usize)];
+                    let args = &self.regs[((start + 1) as usize)..(start as usize + argc as usize)];
+
+                    #[cfg(debug_assertions)]
+                    dbg!(&args);
+
                     let ret = (f.func)(args)?;
                     self.set_reg(dst, ret);
                 }
@@ -137,8 +145,32 @@ impl VM {
     }
 
     #[inline(always)]
+    fn cond_jump(&mut self, reg: RegID, n: u16) {
+        if self.reg(reg).is_truthy() {
+            self.jump(n)
+        }
+    }
+
+    #[inline(always)]
+    fn lookup<E: Env>(&mut self, reg: RegID, env: &mut E) -> Result<()> {
+        self.set_reg(reg, env.get(&self.regs[reg as usize])?);
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn define<E: Env>(&mut self, key: RegID, dst: RegID, env: &mut E) -> Result<()> {
+        env.set(&self.regs[key as usize], &self.regs[dst as usize])?;
+        Ok(())
+    }
+
+    #[inline(always)]
     fn load_const(&mut self, dst: u8, idx: u16) {
         self.set_reg(dst, self.chunk.consts[idx as usize].clone());
+    }
+
+    #[inline(always)]
+    fn move_op(&mut self, dst: RegID, src: RegID) {
+        self.set_reg(dst, self.regs[src as usize].clone());
     }
 
     pub fn run<E: Env>(&mut self, chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
@@ -146,27 +178,22 @@ impl VM {
         self.chunk = chunk;
 
         #[cfg(debug_assertions)]
-        dbg!(&self.chunk);
+        dbg!(&self.chunk.consts);
 
         loop {
             if let Some(op) = self.get_next_op() {
+                #[cfg(debug_assertions)]
+                dbg!(&op);
+
                 match op {
-                    Op::Move { dst, src } => {
-                        self.set_reg(dst, self.regs[src as usize].clone());
-                    }
+                    Op::Move { dst, src } => self.move_op(dst, src),
                     Op::Load { dst, const_idx } => self.load_const(dst, const_idx),
                     Op::Add { a, b, dst } => self.set_reg(dst, (self.reg(a) + self.reg(b))?),
                     Op::Call { dst, start, argc } => self.call(start, argc, dst)?,
-                    Op::CondJmp { reg, n } => {
-                        if self.reg(reg).is_truthy() {
-                            self.jump(n)
-                        }
-                    }
+                    Op::CondJmp { reg, n } => self.cond_jump(reg, n),
                     Op::Jmp(n) => self.jump(n),
-                    Op::LookUp(reg) => self.set_reg(reg, env.get(&self.regs[reg as usize])?),
-                    Op::Define { key, dst } => {
-                        env.set(&self.regs[key as usize], &self.regs[dst as usize])?
-                    }
+                    Op::LookUp(reg) => self.lookup(reg, env)?,
+                    Op::Define { key, dst } => self.define(key, dst, env)?,
                 }
             } else if !self.pop_call() {
                 break;

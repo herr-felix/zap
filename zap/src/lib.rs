@@ -1,3 +1,5 @@
+#[warn(clippy::pedantic)]
+#[allow(clippy::missing_errors_doc)]
 pub mod compiler;
 pub mod env;
 pub mod printer;
@@ -7,22 +9,21 @@ pub mod zap;
 
 pub use crate::zap::*;
 
-#[cfg(test)]
-mod tests {
+#[cfg(debug_assertions)]
+pub mod tests {
     use crate::compiler::compile;
     use crate::env::SandboxEnv;
     use crate::reader::Reader;
-    use crate::vm::{Op, VM};
-    use crate::zap::{Result, String, Value, ZapErr};
+    use crate::vm::VM;
+    use crate::zap::{Result, String};
 
-    fn run_exp(src: &str) -> Result<String> {
+    pub fn run_exp(src: &str, mut env: SandboxEnv) -> Result<String> {
         let mut reader = Reader::new();
 
         dbg!(src);
         reader.tokenize(src);
         reader.flush_token();
 
-        let mut env = SandboxEnv::default();
         let mut vm = VM::init();
 
         let mut ast = reader.read_ast(&mut env)?;
@@ -39,8 +40,9 @@ mod tests {
         }
     }
 
-    fn test_exp(src: &str, expected: &str) {
-        assert_eq!(run_exp(src).unwrap(), expected);
+    pub fn test_exp(src: &str, expected: &str) {
+        let env = SandboxEnv::default();
+        assert_eq!(run_exp(src, env).unwrap(), expected);
     }
 
     #[test]
@@ -106,8 +108,9 @@ mod tests {
 
     #[test]
     fn lookup_symbol() {
+        let mut env = SandboxEnv::default();
         assert_eq!(
-            run_exp("gg"),
+            run_exp("gg", env),
             Err(ZapErr::Msg("symbol 'gg' not in scope.".to_string()))
         );
     }

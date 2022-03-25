@@ -31,3 +31,35 @@ pub fn load<E: Env>(env: &mut E) {
     env.reg_fn("float?", is_float);
     env.reg_fn("false?", is_false);
 }
+
+#[cfg(test)]
+pub mod tests {
+    use super::load;
+    use zap::env::SandboxEnv;
+    use zap::tests::run_exp;
+
+    fn test_exp_core(src: &str, expected: &str) {
+        let mut env = SandboxEnv::default();
+        load(&mut env);
+        assert_eq!(run_exp(src, env).unwrap(), expected);
+    }
+
+    #[test]
+    fn is_false() {
+        test_exp_core("(false? false)", "true");
+        test_exp_core("(false? nil)", "false");
+        test_exp_core("(false? 12)", "false");
+        test_exp_core("(false? true)", "false");
+        test_exp_core("(false? ())", "false");
+    }
+
+    #[test]
+    fn is_float() {
+        test_exp_core("(float? false)", "false");
+        test_exp_core("(float? nil)", "false");
+        test_exp_core("(float? \"test\")", "false");
+        test_exp_core("(float? 12)", "true");
+        test_exp_core("(float? true)", "false");
+        test_exp_core("(float? ())", "false");
+    }
+}

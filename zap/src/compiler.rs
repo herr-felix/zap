@@ -51,8 +51,8 @@ impl<'a, E: Env> Compiler<'a, E> {
         self.argc = argc;
     }
 
-    fn load(&mut self, val: Value) -> Result<()> {
-        let const_idx = self.get_const_idx(&val)?;
+    fn load(&mut self, val: &Value) -> Result<()> {
+        let const_idx = self.get_const_idx(val)?;
         self.emit(Op::Load {
             dst: self.dst,
             const_idx,
@@ -125,27 +125,27 @@ impl<'a, E: Env> Compiler<'a, E> {
     }
 
     pub fn eval_next_in_do(&mut self, list: ZapList, idx: u8, dst: RegID) {
-        if list.len() > idx.into() {
-            let item = list[idx as usize].clone();
+        let item = list[idx as usize].clone();
+        if (list.len() - 1) > idx.into() {
             self.forms.push(Form::Do(list, idx + 1, dst));
-            self.forms.push(Form::Value(item));
         }
+        self.forms.push(Form::Value(item));
         self.dst = dst;
     }
 
-    pub fn eval_const(&mut self, val: Value) -> Result<()> {
+    pub fn eval_const(&mut self, val: &Value) -> Result<()> {
         self.load(val)?;
         Ok(())
     }
 
     pub fn eval_symbol(&mut self, s: Symbol) -> Result<()> {
         // TODO
-        self.load(Value::Symbol(s))?;
+        self.load(&Value::Symbol(s))?;
         self.emit(Op::LookUp(self.dst - 1));
         Ok(())
     }
 
-    pub fn eval_define(&mut self, key: Value, dst: RegID) -> Result<()> {
+    pub fn eval_define(&mut self, key: &Value, dst: RegID) -> Result<()> {
         self.dst = dst + 1;
         // The "value" should be in reg(dst)
         self.load(key)?;
@@ -153,7 +153,7 @@ impl<'a, E: Env> Compiler<'a, E> {
         Ok(())
     }
 
-    pub fn apply(&mut self, kind: ApplyKind, start: u8) -> Result<()> {
+    pub fn apply(&mut self, kind: &ApplyKind, start: u8) -> Result<()> {
         let mut argc = self.argc;
 
         match kind {
@@ -249,23 +249,23 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
             Form::Value(val) => match val {
                 Value::List(list) => {
                     if list.is_empty() {
-                        compiler.eval_const(Value::List(list))?
+                        compiler.eval_const(&Value::List(list))?;
                     } else {
                         compiler.eval_list(list)?;
                     }
                 }
                 Value::Symbol(s) => compiler.eval_symbol(s)?,
-                atom => compiler.eval_const(atom)?,
+                atom => compiler.eval_const(&atom)?,
             },
             Form::List(list, idx) => {
                 if list.len() > idx.into() {
-                    compiler.eval_next_in_list(list, idx)
+                    compiler.eval_next_in_list(list, idx);
                 } else {
                     compiler.set_argc(idx);
                 }
             }
             Form::Apply(kind, start) => {
-                compiler.apply(kind, start)?;
+                compiler.apply(&kind, start)?;
             }
             Form::If(args, start, chunk, then_branch) => {
                 match (chunk, then_branch) {
@@ -288,7 +288,7 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
                 compiler.eval_next_in_do(list, idx, start);
             }
             Form::Define(symbol, reg) => {
-                compiler.eval_define(symbol, reg)?;
+                compiler.eval_define(&symbol, reg)?;
             }
         }
     }
