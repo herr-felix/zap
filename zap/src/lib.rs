@@ -16,7 +16,7 @@ mod tests {
     use crate::compiler::compile;
     use crate::env::SandboxEnv;
     use crate::reader::Reader;
-    use crate::vm::{VM, Op};
+    use crate::vm::{Op, VM};
     use crate::zap::{String, Value};
 
     fn run_exp(src: &str) -> String {
@@ -91,5 +91,10 @@ mod tests {
         assert_eq!(run_exp("(if (+ 1 2) false true)"), "false");
         assert_eq!(run_exp("(if (+ 1 2) (+ 1 2) true)"), "3");
         assert_eq!(run_exp("(if false (+ 1 2) (+ 2 2))"), "4");
+    }
+
+    #[test]
+    fn eval_nested() {
+        assert_eq!(run_exp("(+ 1 2 3 (if false 5 (+ 4 2)))"), "12");
     }
 }

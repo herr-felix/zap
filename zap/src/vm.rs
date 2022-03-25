@@ -7,25 +7,28 @@ use crate::zap::{error_msg, Result, Value, ZapFn};
 // Here lives the VM.
 
 pub type RegID = u8;
+pub type Regs = Vec<Value>;
 
 #[derive(Clone)]
 pub enum Op {
-    Move { dst: RegID, src: RegID },        // Copy the content of src to dst
-    Load { dst: RegID, const_idx: u16 },    // Load the literal Val into resgister reg
+    Move { dst: RegID, src: RegID },     // Copy the content of src to dst
+    Load { dst: RegID, const_idx: u16 }, // Load the literal Val into resgister reg
     Add { a: RegID, b: RegID, dst: RegID }, // Add reg(a) with r(b) and put the result in reg(dst)
-    Call { dst: u8, start: u8, argc: u8 },  // Call the function at reg(0) with argc arguments
-    CondJmp{reg: RegID, n: u16},            // Jump forward n ops if reg(0) is truty
-    Jmp(u16),                               // Jump forward n ops
+    Call { dst: u8, start: u8, argc: u8 }, // Call the function at reg(0) with argc arguments
+    CondJmp { reg: RegID, n: u16 },      // Jump forward n ops if reg(0) is truty
+    Jmp(u16),                            // Jump forward n ops
 }
 
 impl fmt::Debug for Op {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Op::Move { dst, src } => write!(f, "MOVE    {} {}", dst, src),
-            Op::Load { dst, const_idx } => write!(f, "LOAD    {} {}", dst, const_idx),
-            Op::Add { a, b, dst } => write!(f, "ADD     {} {} {}", dst, a, b),
-            Op::Call { dst, start, argc } => write!(f, "CALL    {} {} {}", dst, start, argc),
-            Op::CondJmp{reg, n} => write!(f, "CONDJMP {} {}", reg, n),
+            Op::Move { dst, src } => write!(f, "MOVE    r({}) <- r({})", dst, src),
+            Op::Load { dst, const_idx } => write!(f, "LOAD    r({}) const({})", dst, const_idx),
+            Op::Add { a, b, dst } => write!(f, "ADD     r({}) = r({}) + r({})", dst, a, b),
+            Op::Call { dst, start, argc } => {
+                write!(f, "CALL    r({}) = r({})..{}", dst, start, argc)
+            }
+            Op::CondJmp { reg, n } => write!(f, "CONDJMP r({}) {}", reg, n),
             Op::Jmp(n) => write!(f, "JMP     {}", n),
         }
     }
@@ -40,7 +43,7 @@ pub struct Chunk {
 struct CallFrame {
     chunk: Arc<Chunk>,
     pc: usize,
-    regs: [Value; 256],
+    regs: Regs,
     dst: u8,
 }
 
@@ -48,7 +51,7 @@ pub struct VM {
     pc: usize,
     chunk: Arc<Chunk>,
     calls: Vec<CallFrame>,
-    regs: [Value; 256],
+    regs: Regs,
 }
 
 impl VM {
@@ -57,7 +60,7 @@ impl VM {
             pc: 0,
             chunk: Arc::new(Chunk::default()),
             calls: Vec::with_capacity(8),
-            regs: [(); 256].map(|_| Value::Nil),
+            regs: vec![Value::Nil; 256],
         }
     }
 
@@ -72,8 +75,8 @@ impl VM {
         self.calls.push(CallFrame {
             dst,
             chunk,
-            pc: self.pc,
             regs: self.regs.clone(),
+            pc: self.pc,
         });
         self.pc = 0;
     }
@@ -150,7 +153,7 @@ impl VM {
                     Op::Load { dst, const_idx } => self.load_const(dst, const_idx),
                     Op::Add { a, b, dst } => self.set_reg(dst, (self.reg(a) + self.reg(b))?),
                     Op::Call { dst, start, argc } => self.call(start, argc, dst)?,
-                    Op::CondJmp{reg, n} => {
+                    Op::CondJmp { reg, n } => {
                         if self.reg(reg).is_truthy() {
                             self.jump(n)
                         }

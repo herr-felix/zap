@@ -104,7 +104,7 @@ pub enum ZapFn {
 
 impl ZapFn {
     pub fn native(name: String, func: fn(&[Value]) -> Result<Value>) -> Value {
-        Value::Func(ZapFn::Native(Arc::new(ZapFnNative{name, func})))
+        Value::Func(ZapFn::Native(Arc::new(ZapFnNative { name, func })))
     }
 
     pub fn from_chunk(chunk: Arc<Chunk>) -> Value {
