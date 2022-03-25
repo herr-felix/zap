@@ -17,18 +17,21 @@ enum Form {
     Apply(ApplyKind, RegID),
     If(ZapList, RegID, Option<Vec<Op>>, Option<Vec<Op>>),
     Do(ZapList, u8, RegID),
+    Define(Value, RegID),
 }
 
-struct Compiler {
+struct Compiler<'a, E: Env> {
+    env: &'a mut E,
     chunk: Chunk,
     forms: Vec<Form>,
     dst: RegID,
     argc: u8,
 }
 
-impl Compiler {
-    pub fn init(ast: Value) -> Self {
+impl<'a, E: Env> Compiler<'a, E> {
+    pub fn init(ast: Value, env: &'a mut E) -> Self {
         Compiler {
+            env,
             chunk: Chunk::default(),
             forms: vec![Form::Value(ast)],
             dst: 0,
@@ -92,6 +95,13 @@ impl Compiler {
                 }
                 self.forms.push(Form::Do(list, 1, self.dst));
             }
+            Value::Symbol(symbols::DEFINE) => {
+                if list.len() < 2 {
+                    return Err(error_msg("A def form must 2 parameters"));
+                }
+                self.forms.push(Form::Define(list[1].clone(), self.dst));
+                self.forms.push(Form::Value(list[2].clone()));
+            }
             Value::Symbol(symbols::IF) => {
                 if list.len() != 4 {
                     return Err(error_msg("An if form must have 3 parameters"));
@@ -123,14 +133,23 @@ impl Compiler {
         self.dst = dst;
     }
 
-    pub fn eval_value(&mut self, val: Value) -> Result<()> {
+    pub fn eval_const(&mut self, val: Value) -> Result<()> {
         self.load(val)?;
         Ok(())
     }
 
-    pub fn eval_symbol<E: Env>(&mut self, s: Symbol, _env: &mut E) -> Result<()> {
+    pub fn eval_symbol(&mut self, s: Symbol) -> Result<()> {
         // TODO
         self.load(Value::Symbol(s))?;
+        self.emit(Op::LookUp(self.dst - 1));
+        Ok(())
+    }
+
+    pub fn eval_define(&mut self, key: Value, dst: RegID) -> Result<()> {
+        self.dst = dst + 1;
+        // The "value" should be in reg(dst)
+        self.load(key)?;
+        self.emit(Op::Define { key: dst + 1, dst });
         Ok(())
     }
 
@@ -223,20 +242,20 @@ impl Compiler {
 }
 
 pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
-    let mut compiler = Compiler::init(ast);
+    let mut compiler = Compiler::init(ast, env);
 
     while let Some(form) = compiler.get_form() {
         match form {
             Form::Value(val) => match val {
                 Value::List(list) => {
                     if list.is_empty() {
-                        compiler.eval_value(Value::List(list))?
+                        compiler.eval_const(Value::List(list))?
                     } else {
                         compiler.eval_list(list)?;
                     }
                 }
-                Value::Symbol(s) => compiler.eval_symbol(s, env)?,
-                atom => compiler.eval_value(atom)?,
+                Value::Symbol(s) => compiler.eval_symbol(s)?,
+                atom => compiler.eval_const(atom)?,
             },
             Form::List(list, idx) => {
                 if list.len() > idx.into() {
@@ -267,6 +286,9 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
             }
             Form::Do(list, idx, start) => {
                 compiler.eval_next_in_do(list, idx, start);
+            }
+            Form::Define(symbol, reg) => {
+                compiler.eval_define(symbol, reg)?;
             }
         }
     }

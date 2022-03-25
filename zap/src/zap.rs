@@ -10,7 +10,7 @@ pub type Symbol = usize;
 pub type ZapList = Arc<Vec<Value>>;
 pub type Result<T> = std::result::Result<T, ZapErr>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Value {
     Nil,
     Bool(bool),
@@ -35,6 +35,12 @@ impl Value {
 
     pub fn is_truthy(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
+    }
+}
+
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
     }
 }
 

@@ -14,7 +14,7 @@ pub mod symbols {
         "let",
         "fn",
         "do",
-        "define",
+        "def",
         "quote",
         "quasiquote",
         "unquote",
@@ -35,7 +35,7 @@ pub mod symbols {
 }
 
 pub trait Env {
-    fn get(&self, symbol: Symbol) -> Result<Value>;
+    fn get(&self, key: &Value) -> Result<Value>;
     fn set(&mut self, key: &Value, val: &Value) -> Result<()>;
     fn reg_symbol(&mut self, s: String) -> Value;
     fn get_symbol(&self, key: Symbol) -> Result<String>;
@@ -63,13 +63,16 @@ impl Default for SandboxEnv {
 }
 
 impl Env for SandboxEnv {
-    fn get(&self, key: Symbol) -> Result<Value> {
-        match self.scope.get(&key) {
-            Some(val) => Ok(val.clone()),
-            None => Err(match self.get_symbol(key) {
-                Ok(s) => error_msg(format!("symbol '{}' not in scope.", s).as_str()),
-                Err(err) => err,
-            }),
+    fn get(&self, key: &Value) -> Result<Value> {
+        match key {
+            Value::Symbol(id) => match self.scope.get(id) {
+                Some(val) => Ok(val.clone()),
+                None => Err(match self.get_symbol(*id) {
+                    Ok(s) => error_msg(format!("symbol '{}' not in scope.", s).as_str()),
+                    Err(err) => err,
+                }),
+            },
+            _ => Err(error_msg("Only symbols can be used as keys in env.")),
         }
     }
 

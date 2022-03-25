@@ -13,10 +13,12 @@ pub type Regs = Vec<Value>;
 pub enum Op {
     Move { dst: RegID, src: RegID },     // Copy the content of src to dst
     Load { dst: RegID, const_idx: u16 }, // Load the literal Val into resgister reg
-    Add { a: RegID, b: RegID, dst: RegID }, // Add reg(a) with r(b) and put the result in reg(dst)
-    Call { dst: u8, start: u8, argc: u8 }, // Call the function at reg(0) with argc arguments
-    CondJmp { reg: RegID, n: u16 },      // Jump forward n ops if reg(0) is truty
+    Add { a: RegID, b: RegID, dst: RegID }, // Add r(a) with r(b) and put the result in r(dst)
+    Call { dst: u8, start: u8, argc: u8 }, // Call the function at r(0) with argc arguments
+    CondJmp { reg: RegID, n: u16 },      // Jump forward n ops if r(reg) is truty
     Jmp(u16),                            // Jump forward n ops
+    LookUp(RegID),                       // LookUp r(id) in the env and puts the results in r(id)
+    Define { key: RegID, dst: RegID }, // Associate the value r(dst) with the key r(key) in the env
 }
 
 impl fmt::Debug for Op {
@@ -30,6 +32,8 @@ impl fmt::Debug for Op {
             }
             Op::CondJmp { reg, n } => write!(f, "CONDJMP r({}) {}", reg, n),
             Op::Jmp(n) => write!(f, "JMP     {}", n),
+            Op::LookUp(reg) => write!(f, "LOOKUP  r({})", reg),
+            Op::Define { key, dst } => write!(f, "DEFINE  r({}) r({})", key, dst),
         }
     }
 }
@@ -137,7 +141,7 @@ impl VM {
         self.set_reg(dst, self.chunk.consts[idx as usize].clone());
     }
 
-    pub fn run<E: Env>(&mut self, chunk: Arc<Chunk>, _env: &mut E) -> Result<Value> {
+    pub fn run<E: Env>(&mut self, chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
         self.pc = 0;
         self.chunk = chunk;
 
@@ -159,6 +163,10 @@ impl VM {
                         }
                     }
                     Op::Jmp(n) => self.jump(n),
+                    Op::LookUp(reg) => self.set_reg(reg, env.get(&self.regs[reg as usize])?),
+                    Op::Define { key, dst } => {
+                        env.set(&self.regs[key as usize], &self.regs[dst as usize])?
+                    }
                 }
             } else if !self.pop_call() {
                 break;
