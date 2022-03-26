@@ -8,17 +8,21 @@ use std::sync::Arc;
 // The compiler takes the expression returned by the reader and return an array of bytecodes
 // which can be executed by the VM.
 
+#[derive(Debug)]
 enum ApplyKind {
     Call,
     Add,
     Eq,
 }
 
+#[derive(Debug)]
 enum Form {
     Value(Value),
     List(ZapList, u8),
     Apply(ApplyKind, RegID),
-    If(ZapList, RegID, Option<Vec<Op>>, Option<Vec<Op>>),
+    IfCond(ZapList, RegID),
+    IfThen(ZapList, RegID, Vec<Op>),
+    IfElse(ZapList, RegID, Vec<Op>, Vec<Op>),
     Do(ZapList, u8, RegID),
     Define(Value, RegID),
     Return(Chunk, RegID),
@@ -50,7 +54,14 @@ impl<'a, E: Env> Compiler<'a, E> {
     }
 
     fn is_last_exp(&self) -> bool {
-        matches!(self.forms.last(), Some(Form::Return(_, _)))
+        for form in self.forms.iter().rev() {
+            match form {
+                Form::Return(_, _) => return true,
+                Form::IfThen(_, _, _) | Form::IfElse(_, _, _, _) => continue,
+                _ => return false,
+            }
+        }
+        false
     }
 
     fn register_local(&mut self, key: &Value) -> Result<()> {
@@ -142,8 +153,6 @@ impl<'a, E: Env> Compiler<'a, E> {
 
                         self.dst = 0;
 
-                        //self.push_locals();
-
                         // Set all the params in the locals.
                         for arg in args.iter() {
                             self.register_local(arg)?;
@@ -167,7 +176,7 @@ impl<'a, E: Env> Compiler<'a, E> {
                     return Err(error_msg("An if form must have 3 parameters"));
                 }
                 let cond = list[1].clone();
-                self.forms.push(Form::If(list, self.dst, None, None));
+                self.forms.push(Form::IfCond(list, self.dst));
                 self.forms.push(Form::Value(cond));
             }
             _ => {
@@ -226,8 +235,12 @@ impl<'a, E: Env> Compiler<'a, E> {
 
         match kind {
             ApplyKind::Call => {
-                // Arguments were pushed on the stack
-                self.emit(Op::Call { start, argc });
+                dbg!(&self.forms);
+                if self.is_last_exp() {
+                    self.emit(Op::Tailcall { start, argc });
+                } else {
+                    self.emit(Op::Call { start, argc });
+                }
             }
             ApplyKind::Add => {
                 argc -= 1; // The '+' symbol was not pushed, but was still counted in the argc
@@ -269,7 +282,7 @@ impl<'a, E: Env> Compiler<'a, E> {
                         if argc > 1 {
                             self.emit(Op::CondJmp {
                                 reg: start,
-                                n: (argc as u16 - 1) * 2 - 1,
+                                n: (u16::from(argc) - 1) * 2 - 1,
                             })
                         }
                     }
@@ -282,25 +295,24 @@ impl<'a, E: Env> Compiler<'a, E> {
         Ok(())
     }
 
-    pub fn then_branch(&mut self, args: ZapList, dst: u8) {
+    pub fn eval_then_branch(&mut self, args: ZapList, dst: u8) {
         let branch = args[2].clone();
-        self.forms.push(Form::If(
+        self.forms.push(Form::IfThen(
             args,
             dst,
-            Some(std::mem::take(&mut self.chunk.ops)),
-            None,
+            std::mem::take(&mut self.chunk.ops),
         ));
         self.dst = dst;
         self.forms.push(Form::Value(branch));
     }
 
-    pub fn else_branch(&mut self, args: ZapList, dst: u8, chunk: Vec<Op>) {
+    pub fn eval_else_branch(&mut self, args: ZapList, dst: u8, chunk: Vec<Op>) {
         let branch = args[3].clone();
-        self.forms.push(Form::If(
+        self.forms.push(Form::IfElse(
             args,
             dst,
-            Some(chunk),
-            Some(std::mem::take(&mut self.chunk.ops)),
+            chunk,
+            std::mem::take(&mut self.chunk.ops),
         ));
         self.dst = dst;
         self.forms.push(Form::Value(branch));
@@ -368,22 +380,17 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
             Form::Apply(kind, start) => {
                 compiler.apply(&kind, start)?;
             }
-            Form::If(args, start, chunk, then_branch) => {
-                match (chunk, then_branch) {
-                    (None, None) => {
-                        // Then branch
-                        compiler.then_branch(args, start);
-                    }
-                    (Some(chunk), None) => {
-                        // Else branch
-                        compiler.else_branch(args, start, chunk);
-                    }
-                    (Some(chunk), Some(then_branch)) => {
-                        // Combine the branches in the chunk
-                        compiler.combine_branches(start, chunk, then_branch)?;
-                    }
-                    _ => {}
-                }
+            Form::IfCond(args, start) => {
+                // Then branch
+                compiler.eval_then_branch(args, start);
+            }
+            Form::IfThen(args, start, chunk) => {
+                // Else branch
+                compiler.eval_else_branch(args, start, chunk);
+            }
+            Form::IfElse(args, start, chunk, then_branch) => {
+                // Combine the branches in the chunk
+                compiler.combine_branches(start, chunk, then_branch)?;
             }
             Form::Do(list, idx, start) => {
                 compiler.eval_next_in_do(list, idx, start);

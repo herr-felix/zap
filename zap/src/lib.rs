@@ -14,8 +14,8 @@ pub mod tests {
     use crate::compiler::compile;
     use crate::env::SandboxEnv;
     use crate::reader::Reader;
-    use crate::vm::{Op, VM};
-    use crate::zap::{Result, String, Value, ZapErr};
+    use crate::vm::{VM, Op};
+    use crate::zap::{Result, String, ZapErr, Value};
 
     pub fn run_exp(src: &str, mut env: SandboxEnv) -> Result<String> {
         let mut reader = Reader::new();
@@ -92,6 +92,7 @@ pub mod tests {
         test_exp("(= nil false)", "false");
         test_exp("(= false false)", "true");
         test_exp("(= 1 1 1 4 1)", "false");
+        test_exp("(= 1 1 1 4)", "false");
     }
 
     #[test]

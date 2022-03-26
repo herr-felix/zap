@@ -16,6 +16,7 @@ pub enum Op {
     Add { a: RegID, b: RegID, dst: RegID }, // Add r(a) with r(b) and put the result in r(dst)
     Eq { a: RegID, b: RegID, dst: RegID }, // Set r(dst) to 'true' if r(a) == r(b), if not, set r(dst) to false.
     Call { start: u8, argc: u8 },          // Call the function at r(0) with argc arguments
+    Tailcall { start: u8, argc: u8 },      // Call the function at r(0) with argc arguments, but doesn't save the caller's registers.
     CondJmp { reg: RegID, n: u16 },        // Jump forward n ops if r(reg) is falsy
     Jmp(u16),                              // Jump forward n ops
     LookUp(RegID),                         // LookUp r(id) in the env and puts the results in r(id)
@@ -26,11 +27,14 @@ impl fmt::Debug for Op {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Op::Move { dst, src } => write!(f, "MOVE    r({}) <- r({})", dst, src),
-            Op::Load { dst, const_idx } => write!(f, "LOAD    r({}) const({})", dst, const_idx),
-            Op::Add { a, b, dst } => write!(f, "ADD     r({}) = r({}) + r({})", dst, a, b),
-            Op::Eq { a, b, dst } => write!(f, "Eq      r({}) = r({}) == r({})", dst, a, b),
+            Op::Load { dst, const_idx } => write!(f, "LOAD    r({}) <- const({})", dst, const_idx),
+            Op::Add { a, b, dst } => write!(f, "ADD     r({}) <- r({}) + r({})", dst, a, b),
+            Op::Eq { a, b, dst } => write!(f, "EQ      r({}) <- r({}) == r({})", dst, a, b),
             Op::Call { start, argc } => {
-                write!(f, "CALL    r({}) = r({})..{}", start, start, argc)
+                write!(f, "CALL    r({}) <- r({})..{}", start, start, argc)
+            }
+            Op::Tailcall { start, argc } => {
+                write!(f, "TAILCALL     r({}) <- r({})..{}", start, start, argc)
             }
             Op::CondJmp { reg, n } => write!(f, "CONDJMP r({}) {}", reg, n),
             Op::Jmp(n) => write!(f, "JMP     {}", n),
@@ -224,7 +228,7 @@ impl VM {
             if let Some(op) = self.get_next_op() {
                 #[cfg(debug_assertions)]
                 println!(
-                    "OP: {:<35} {}",
+                    "OP: {:<30} {}",
                     format!("{:?}", &op),
                     format!("REGS: {:?}", &self.regs)
                 );
@@ -237,6 +241,7 @@ impl VM {
                         self.set_reg(dst, Value::Bool(self.reg(a) == self.reg(b)))
                     }
                     Op::Call { start, argc } => self.call(start, argc, false)?,
+                    Op::Tailcall { start, argc } => self.call(start, argc, true)?,
                     Op::CondJmp { reg, n } => self.cond_jump(reg, n),
                     Op::Jmp(n) => self.jump(n),
                     Op::LookUp(reg) => self.lookup(reg, env)?,
