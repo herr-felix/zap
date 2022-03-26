@@ -61,7 +61,7 @@ impl<'a, E: Env> Compiler<'a, E> {
                 _ => return false,
             }
         }
-        false
+        true
     }
 
     fn register_local(&mut self, key: &Value) -> Result<()> {
