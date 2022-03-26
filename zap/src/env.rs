@@ -1,7 +1,7 @@
 use crate::zap::{error_msg, Result, String, Symbol, Value, ZapFn};
 use fxhash::FxHashMap;
 
-type Scope = FxHashMap<Symbol, Value>;
+pub type Scope = FxHashMap<Symbol, Value>;
 type SymbolTable = FxHashMap<String, Symbol>;
 
 pub mod symbols {
@@ -9,7 +9,7 @@ pub mod symbols {
     //
     // TODO: Make sures all the default symbols (for special forms) are here.
     // TODO: Make a macro that generate const Symbol for each default symbols.
-    pub const DEFAULT_SYMBOLS: [&str; 10] = [
+    pub const DEFAULT_SYMBOLS: [&str; 11] = [
         "if",
         "let",
         "fn",
@@ -20,6 +20,7 @@ pub mod symbols {
         "unquote",
         "splice-unquote",
         "+",
+        "=",
     ];
 
     pub const IF: Symbol = 0;
@@ -32,6 +33,7 @@ pub mod symbols {
     pub const UNQUOTE: Symbol = 7;
     pub const SPLICE_UNQUOTE: Symbol = 8;
     pub const PLUS: Symbol = 9;
+    pub const EQUAL: Symbol = 10;
 }
 
 pub trait Env {

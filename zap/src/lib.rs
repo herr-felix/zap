@@ -86,6 +86,15 @@ pub mod tests {
     }
 
     #[test]
+    fn eval_eq() {
+        test_exp("(= 1 2)", "false");
+        test_exp("(= 1 1 1)", "true");
+        test_exp("(= nil false)", "false");
+        test_exp("(= false false)", "true");
+        test_exp("(= 1 1 1 4 1)", "false");
+    }
+
+    #[test]
     fn eval_if() {
         test_exp("(if true 10 20)", "10");
         test_exp("(if false 10 20)", "20");
@@ -108,7 +117,7 @@ pub mod tests {
 
     #[test]
     fn lookup_symbol() {
-        let mut env = SandboxEnv::default();
+        let env = SandboxEnv::default();
         assert_eq!(
             run_exp("gg", env),
             Err(ZapErr::Msg("symbol 'gg' not in scope.".to_string()))
@@ -121,5 +130,11 @@ pub mod tests {
         test_exp("(def x 3) (+ x 2)", "5");
         test_exp("(def x 3) (def y 5) (+ x y)", "8");
         test_exp("(def x (+ 1 3)) (def y 5) (+ x y)", "9");
+    }
+
+    #[test]
+    fn eval_fn() {
+        test_exp("((fn (x) (+ x 3)) 4)", "7");
+        test_exp("(def add2 (fn (x) (+ x 2))) (add2 8)", "10");
     }
 }

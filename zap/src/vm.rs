@@ -14,10 +14,11 @@ pub enum Op {
     Move { dst: RegID, src: RegID },     // Copy the content of src to dst
     Load { dst: RegID, const_idx: u16 }, // Load the literal Val into resgister reg
     Add { a: RegID, b: RegID, dst: RegID }, // Add r(a) with r(b) and put the result in r(dst)
-    Call { start: u8, argc: u8 }, // Call the function at r(0) with argc arguments
-    CondJmp { reg: RegID, n: u16 },      // Jump forward n ops if r(reg) is truty
-    Jmp(u16),                            // Jump forward n ops
-    LookUp(RegID),                       // LookUp r(id) in the env and puts the results in r(id)
+    Eq { a: RegID, b: RegID, dst: RegID }, // Set r(dst) to 'true' if r(a) == r(b), if not, set r(dst) to false.
+    Call { start: u8, argc: u8 },          // Call the function at r(0) with argc arguments
+    CondJmp { reg: RegID, n: u16 },        // Jump forward n ops if r(reg) is falsy
+    Jmp(u16),                              // Jump forward n ops
+    LookUp(RegID),                         // LookUp r(id) in the env and puts the results in r(id)
     Define { key: RegID, dst: RegID }, // Associate the value r(dst) with the key r(key) in the env
 }
 
@@ -27,6 +28,7 @@ impl fmt::Debug for Op {
             Op::Move { dst, src } => write!(f, "MOVE    r({}) <- r({})", dst, src),
             Op::Load { dst, const_idx } => write!(f, "LOAD    r({}) const({})", dst, const_idx),
             Op::Add { a, b, dst } => write!(f, "ADD     r({}) = r({}) + r({})", dst, a, b),
+            Op::Eq { a, b, dst } => write!(f, "Eq      r({}) = r({}) == r({})", dst, a, b),
             Op::Call { start, argc } => {
                 write!(f, "CALL    r({}) = r({})..{}", start, start, argc)
             }
@@ -81,21 +83,23 @@ impl VM {
 
     fn tailcall(&mut self, new_chunk: Arc<Chunk>, start: usize, argc: usize) {
         for i in start..argc {
-            self.regs.swap(i, i+start);
+            self.regs.swap(i, i + start);
         }
-        self.regs.resize_with(new_chunk.used_regs as usize, Default::default);
+        self.regs
+            .resize_with(new_chunk.used_regs as usize, Default::default);
         self.chunk = new_chunk;
         self.pc = 0;
     }
 
     fn push_call(&mut self, new_chunk: Arc<Chunk>, start: u8, argc: usize) {
-
         #[cfg(debug_assertions)]
-        println!("SAVING: {:?}", &self.regs);
+        {
+            println!("SAVING: {:?}", &self.regs);
+            dbg!(&new_chunk);
+        }
 
         // Create the new register and but the args at the start
-        let mut saved_regs = Vec::with_capacity(self.chunk.used_regs as usize);
-        saved_regs.fill(Value::Nil);
+        let mut saved_regs = vec![Value::Nil; new_chunk.used_regs as usize];
 
         std::mem::swap(&mut saved_regs, &mut self.regs); // SWAP!
 
@@ -180,7 +184,7 @@ impl VM {
 
     #[inline(always)]
     fn cond_jump(&mut self, reg: RegID, n: u16) {
-        if self.reg(reg).is_truthy() {
+        if !self.reg(reg).is_truthy() {
             self.jump(n)
         }
     }
@@ -209,7 +213,8 @@ impl VM {
 
     pub fn run<E: Env>(&mut self, chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
         self.pc = 0;
-        self.regs.resize_with(chunk.used_regs.into(), Default::default);
+        self.regs
+            .resize_with(chunk.used_regs.into(), Default::default);
         self.chunk = chunk;
 
         #[cfg(debug_assertions)]
@@ -218,12 +223,19 @@ impl VM {
         loop {
             if let Some(op) = self.get_next_op() {
                 #[cfg(debug_assertions)]
-                println!("OP: {:<35} {}", format!("{:?}", &op), format!("REGS: {:?}", &self.regs));
+                println!(
+                    "OP: {:<35} {}",
+                    format!("{:?}", &op),
+                    format!("REGS: {:?}", &self.regs)
+                );
 
                 match op {
                     Op::Move { dst, src } => self.move_op(dst, src),
                     Op::Load { dst, const_idx } => self.load_const(dst, const_idx),
                     Op::Add { a, b, dst } => self.set_reg(dst, (self.reg(a) + self.reg(b))?),
+                    Op::Eq { a, b, dst } => {
+                        self.set_reg(dst, Value::Bool(self.reg(a) == self.reg(b)))
+                    }
                     Op::Call { start, argc } => self.call(start, argc, false)?,
                     Op::CondJmp { reg, n } => self.cond_jump(reg, n),
                     Op::Jmp(n) => self.jump(n),

@@ -1,8 +1,9 @@
 use crate::env::{symbols, Env};
 use crate::vm::{Chunk, Op, RegID};
-use crate::zap::{error_msg, Result, Symbol, Value, ZapList};
-use std::sync::Arc;
+use crate::zap::{error_msg, Result, Symbol, Value, ZapFn, ZapList};
+use fxhash::FxHashMap;
 use std::cmp::max;
+use std::sync::Arc;
 
 // The compiler takes the expression returned by the reader and return an array of bytecodes
 // which can be executed by the VM.
@@ -10,6 +11,7 @@ use std::cmp::max;
 enum ApplyKind {
     Call,
     Add,
+    Eq,
 }
 
 enum Form {
@@ -19,6 +21,7 @@ enum Form {
     If(ZapList, RegID, Option<Vec<Op>>, Option<Vec<Op>>),
     Do(ZapList, u8, RegID),
     Define(Value, RegID),
+    Return(Chunk, RegID),
 }
 
 struct Compiler<'a, E: Env> {
@@ -27,6 +30,7 @@ struct Compiler<'a, E: Env> {
     forms: Vec<Form>,
     dst: RegID,
     argc: u8,
+    locals: Vec<FxHashMap<Symbol, u8>>,
 }
 
 impl<'a, E: Env> Compiler<'a, E> {
@@ -37,11 +41,31 @@ impl<'a, E: Env> Compiler<'a, E> {
             forms: vec![Form::Value(ast)],
             dst: 0,
             argc: 0,
+            locals: vec![FxHashMap::<Symbol, u8>::default()],
         }
     }
 
     pub fn get_form(&mut self) -> Option<Form> {
         self.forms.pop()
+    }
+
+    fn is_last_exp(&self) -> bool {
+        matches!(self.forms.last(), Some(Form::Return(_, _)))
+    }
+
+    fn register_local(&mut self, key: &Value) -> Result<()> {
+        if let Value::Symbol(symbol) = key {
+            self.bumb_dst();
+            let locals = self.locals.last_mut().unwrap();
+            locals.insert(*symbol, self.dst);
+            Ok(())
+        } else {
+            Err(error_msg("Only symbols can be used as args in fn."))
+        }
+    }
+
+    fn get_local(&mut self, s: Symbol) -> Option<RegID> {
+        self.locals.last().unwrap().get(&s).copied()
     }
 
     pub fn chunk(mut self) -> Arc<Chunk> {
@@ -96,11 +120,40 @@ impl<'a, E: Env> Compiler<'a, E> {
                 self.forms.push(Form::Apply(ApplyKind::Add, self.dst));
                 self.forms.push(Form::List(list, 1));
             }
+            Value::Symbol(symbols::EQUAL) => {
+                self.forms.push(Form::Apply(ApplyKind::Eq, self.dst));
+                self.forms.push(Form::List(list, 1));
+            }
             Value::Symbol(symbols::DO) => {
                 if list.len() < 2 {
                     return Err(error_msg("A do form must contains at least 1 parameter"));
                 }
                 self.forms.push(Form::Do(list, 1, self.dst));
+            }
+            Value::Symbol(symbols::FN) => {
+                if list.len() != 3 {
+                    return Err(error_msg("A fn form must contains 2 parameters"));
+                }
+                match &list[1] {
+                    Value::List(args) => {
+                        // We save the current chunk
+                        let chunk = std::mem::take(&mut self.chunk);
+                        self.forms.push(Form::Return(chunk, self.dst));
+
+                        self.dst = 0;
+
+                        //self.push_locals();
+
+                        // Set all the params in the locals.
+                        for arg in args.iter() {
+                            self.register_local(arg)?;
+                        }
+                        self.forms.push(Form::Value(list[2].clone()));
+                    }
+                    _ => {
+                        return Err(error_msg("fn's first parameter must be a list"));
+                    }
+                }
             }
             Value::Symbol(symbols::DEFINE) => {
                 if list.len() < 2 {
@@ -146,9 +199,16 @@ impl<'a, E: Env> Compiler<'a, E> {
     }
 
     pub fn eval_symbol(&mut self, s: Symbol) -> Result<()> {
-        // TODO
-        self.load(&Value::Symbol(s))?;
-        self.emit(Op::LookUp(self.dst - 1));
+        if let Some(reg) = self.get_local(s) {
+            self.bumb_dst();
+            self.emit(Op::Move {
+                dst: self.dst,
+                src: reg,
+            });
+        } else {
+            self.load(&Value::Symbol(s))?;
+            self.emit(Op::LookUp(self.dst - 1));
+        }
         Ok(())
     }
 
@@ -167,13 +227,10 @@ impl<'a, E: Env> Compiler<'a, E> {
         match kind {
             ApplyKind::Call => {
                 // Arguments were pushed on the stack
-                self.emit(Op::Call {
-                    start,
-                    argc,
-                });
+                self.emit(Op::Call { start, argc });
             }
             ApplyKind::Add => {
-                argc -= 1; // The '+' symbol was not pushed, but was still counted in teh argc
+                argc -= 1; // The '+' symbol was not pushed, but was still counted in the argc
                 if argc == 0 {
                     let const_idx = self.get_const_idx(&Value::Number(0.0))?;
                     self.emit(Op::Load {
@@ -192,6 +249,35 @@ impl<'a, E: Env> Compiler<'a, E> {
                     }
                 }
             }
+            ApplyKind::Eq => {
+                argc -= 1; // The '=' symbol was not pushed, but was still counted in the argc
+                let count = argc;
+                if argc == 1 {
+                    let const_idx = self.get_const_idx(&Value::Bool(true))?;
+                    self.emit(Op::Load {
+                        dst: start,
+                        const_idx,
+                    });
+                } else if argc > 1 {
+                    while argc > 1 {
+                        self.emit(Op::Eq {
+                            a: start + count - argc,
+                            b: start + count - 1,
+                            dst: start,
+                        });
+                        argc -= 1;
+                        if argc > 1 {
+                            self.emit(Op::CondJmp {
+                                reg: start,
+                                n: (argc as u16 - 1) * 2 - 1,
+                            })
+                        }
+                    }
+                }
+            }
+        }
+        if self.is_last_exp() {
+            self.emit(Op::Move { dst: 0, src: start });
         }
         Ok(())
     }
@@ -228,23 +314,31 @@ impl<'a, E: Env> Compiler<'a, E> {
     ) -> Result<()> {
         let else_branch = std::mem::replace(&mut self.chunk.ops, chunk);
 
-        let else_jump = (1 + else_branch.len())
-            .try_into()
-            .map_err(|_| error_msg("Else branch jump is too big."))?;
-        self.emit(Op::CondJmp {
-            reg: dst,
-            n: else_jump,
-        });
-        self.chunk.ops.extend(else_branch);
-
-        let then_jump = then_branch
-            .len()
+        let then_jump = (1 + then_branch.len())
             .try_into()
             .map_err(|_| error_msg("Then branch jump is too big."))?;
-        self.emit(Op::Jmp(then_jump));
+        self.emit(Op::CondJmp {
+            reg: dst,
+            n: then_jump,
+        });
         self.chunk.ops.extend(then_branch);
 
+        let else_jump = else_branch
+            .len()
+            .try_into()
+            .map_err(|_| error_msg("Else branch jump is too big."))?;
+        self.emit(Op::Jmp(else_jump));
+        self.chunk.ops.extend(else_branch);
+
         Ok(())
+    }
+
+    pub fn wrap_fn(&mut self, mut chunk: Chunk, dst: RegID) {
+        // Swap the chunks
+        std::mem::swap(&mut self.chunk, &mut chunk);
+        self.dst = dst;
+        self.forms
+            .push(Form::Value(ZapFn::from_chunk(Arc::new(chunk))));
     }
 }
 
@@ -297,6 +391,7 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
             Form::Define(symbol, reg) => {
                 compiler.eval_define(&symbol, reg)?;
             }
+            Form::Return(chunk, dst) => compiler.wrap_fn(chunk, dst),
         }
     }
 
