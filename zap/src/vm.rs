@@ -14,7 +14,7 @@ pub enum Op {
     Move { dst: RegID, src: RegID },     // Copy the content of src to dst
     Load { dst: RegID, const_idx: u16 }, // Load the literal Val into resgister reg
     Add { a: RegID, b: RegID, dst: RegID }, // Add r(a) with r(b) and put the result in r(dst)
-    Call { dst: u8, start: u8, argc: u8 }, // Call the function at r(0) with argc arguments
+    Call { start: u8, argc: u8 }, // Call the function at r(0) with argc arguments
     CondJmp { reg: RegID, n: u16 },      // Jump forward n ops if r(reg) is truty
     Jmp(u16),                            // Jump forward n ops
     LookUp(RegID),                       // LookUp r(id) in the env and puts the results in r(id)
@@ -27,8 +27,8 @@ impl fmt::Debug for Op {
             Op::Move { dst, src } => write!(f, "MOVE    r({}) <- r({})", dst, src),
             Op::Load { dst, const_idx } => write!(f, "LOAD    r({}) const({})", dst, const_idx),
             Op::Add { a, b, dst } => write!(f, "ADD     r({}) = r({}) + r({})", dst, a, b),
-            Op::Call { dst, start, argc } => {
-                write!(f, "CALL    r({}) = r({})..{}", dst, start, argc)
+            Op::Call { start, argc } => {
+                write!(f, "CALL    r({}) = r({})..{}", start, start, argc)
             }
             Op::CondJmp { reg, n } => write!(f, "CONDJMP r({}) {}", reg, n),
             Op::Jmp(n) => write!(f, "JMP     {}", n),
@@ -42,7 +42,7 @@ impl fmt::Debug for Op {
 pub struct Chunk {
     pub ops: Vec<Op>,
     pub consts: Vec<Value>,
-    pub max_regs: RegID,
+    pub used_regs: RegID,
 }
 
 struct CallFrame {
@@ -65,7 +65,7 @@ impl VM {
             pc: 0,
             chunk: Arc::new(Chunk::default()),
             calls: Vec::with_capacity(8),
-            regs: vec![Value::Nil; 256],
+            regs: Vec::new(),
         }
     }
 
@@ -79,25 +79,54 @@ impl VM {
         }
     }
 
-    fn push_call(&mut self, new_chunk: Arc<Chunk>, dst: u8) {
-        let chunk = std::mem::replace(&mut self.chunk, new_chunk);
+    fn tailcall(&mut self, new_chunk: Arc<Chunk>, start: usize, argc: usize) {
+        for i in start..argc {
+            self.regs.swap(i, i+start);
+        }
+        self.regs.resize_with(new_chunk.used_regs as usize, Default::default);
+        self.chunk = new_chunk;
+        self.pc = 0;
+    }
+
+    fn push_call(&mut self, new_chunk: Arc<Chunk>, start: u8, argc: usize) {
+
+        #[cfg(debug_assertions)]
+        println!("SAVING: {:?}", &self.regs);
+
+        // Create the new register and but the args at the start
+        let mut saved_regs = Vec::with_capacity(self.chunk.used_regs as usize);
+        saved_regs.fill(Value::Nil);
+
+        std::mem::swap(&mut saved_regs, &mut self.regs); // SWAP!
+
+        let start_idx: usize = start.into();
+        for offset in 0..argc {
+            std::mem::swap(&mut saved_regs[offset], &mut self.regs[start_idx + offset]);
+        }
+
+        // Swap the chunks!
+        let old_chunk = std::mem::replace(&mut self.chunk, new_chunk);
+
         self.calls.push(CallFrame {
-            dst,
-            saved_regs: self.regs[0..=(chunk.max_regs as usize)].to_vec(),
-            chunk,
+            dst: start,
+            chunk: old_chunk,
+            saved_regs,
             pc: self.pc,
         });
+
         self.pc = 0;
     }
 
     fn pop_call(&mut self) -> bool {
         if let Some(frame) = self.calls.pop() {
             let ret = self.regs[0].clone();
-            self.pc = frame.pc;
-            for i in 0..=frame.saved_regs.len() {
-                self.regs[i] = frame.saved_regs[i].clone();
-            }
+
+            #[cfg(debug_assertions)]
+            println!("RETURN: {:?}", &self.regs);
+
+            self.regs = frame.saved_regs;
             self.chunk = frame.chunk;
+            self.pc = frame.pc;
             self.set_reg(frame.dst, ret);
             true
         } else {
@@ -115,7 +144,7 @@ impl VM {
         self.regs[idx as usize].clone()
     }
 
-    fn call(&mut self, start: u8, argc: u8, dst: u8) -> Result<()> {
+    fn call(&mut self, start: u8, argc: u8, is_tailcall: bool) -> Result<()> {
         // Set the chunk in reg(0) as current chunk
         if let Value::Func(f) = self.reg(start) {
             match f {
@@ -126,14 +155,16 @@ impl VM {
                     dbg!(&args);
 
                     let ret = (f.func)(args)?;
-                    self.set_reg(dst, ret);
+                    self.set_reg(start, ret);
                 }
-                ZapFn::Chunk(chunk) => {
-                    self.push_call(chunk, dst);
-                    // Move the args at the begining
-                    for offset in 0..(argc as usize) {
-                        self.regs.swap((start as usize) + offset, offset);
+                ZapFn::Chunk(new_chunk) => {
+                    if is_tailcall {
+                        self.tailcall(new_chunk, start.into(), argc.into());
+                    } else {
+                        self.push_call(new_chunk, start, argc.into());
                     }
+                    #[cfg(debug_assertions)]
+                    dbg!("{:?}", &self.chunk.consts);
                 }
             }
             Ok(())
@@ -178,6 +209,7 @@ impl VM {
 
     pub fn run<E: Env>(&mut self, chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
         self.pc = 0;
+        self.regs.resize_with(chunk.used_regs.into(), Default::default);
         self.chunk = chunk;
 
         #[cfg(debug_assertions)]
@@ -186,13 +218,13 @@ impl VM {
         loop {
             if let Some(op) = self.get_next_op() {
                 #[cfg(debug_assertions)]
-                dbg!(&op);
+                println!("OP: {:<35} {}", format!("{:?}", &op), format!("REGS: {:?}", &self.regs));
 
                 match op {
                     Op::Move { dst, src } => self.move_op(dst, src),
                     Op::Load { dst, const_idx } => self.load_const(dst, const_idx),
                     Op::Add { a, b, dst } => self.set_reg(dst, (self.reg(a) + self.reg(b))?),
-                    Op::Call { dst, start, argc } => self.call(start, argc, dst)?,
+                    Op::Call { start, argc } => self.call(start, argc, false)?,
                     Op::CondJmp { reg, n } => self.cond_jump(reg, n),
                     Op::Jmp(n) => self.jump(n),
                     Op::LookUp(reg) => self.lookup(reg, env)?,
@@ -202,6 +234,9 @@ impl VM {
                 break;
             }
         }
+
+        #[cfg(debug_assertions)]
+        println!("FINAL: {:?}", &self.regs);
 
         Ok(self.regs[0].clone())
     }

@@ -44,7 +44,8 @@ impl<'a, E: Env> Compiler<'a, E> {
         self.forms.pop()
     }
 
-    pub fn chunk(self) -> Arc<Chunk> {
+    pub fn chunk(mut self) -> Arc<Chunk> {
+        self.chunk.used_regs = max(self.chunk.used_regs, 1);
         Arc::new(self.chunk)
     }
 
@@ -53,8 +54,8 @@ impl<'a, E: Env> Compiler<'a, E> {
     }
 
     fn bumb_dst(&mut self) {
+        self.chunk.used_regs = max(self.dst + 1, self.chunk.used_regs);
         self.dst += 1;
-        self.chunk.max_regs = max(self.dst, self.chunk.max_regs);
     }
 
     fn load(&mut self, val: &Value) -> Result<()> {
@@ -167,7 +168,6 @@ impl<'a, E: Env> Compiler<'a, E> {
             ApplyKind::Call => {
                 // Arguments were pushed on the stack
                 self.emit(Op::Call {
-                    dst: start,
                     start,
                     argc,
                 });
