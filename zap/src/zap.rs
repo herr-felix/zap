@@ -44,7 +44,7 @@ impl std::fmt::Debug for Value {
     }
 }
 
-impl core::ops::Add for Value {
+impl core::ops::Add for &Value {
     type Output = Result<Value>;
 
     #[inline(always)]

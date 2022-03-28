@@ -11,35 +11,33 @@ pub type Regs = Vec<Value>;
 
 #[derive(Clone)]
 pub enum Op {
-    Move { dst: RegID, src: RegID },     // Copy the content of src to dst
-    Load { dst: RegID, const_idx: u16 }, // Load the literal Val into resgister reg
-    Add { a: RegID, b: RegID, dst: RegID }, // Add r(a) with r(b) and put the result in r(dst)
-    Eq { a: RegID, b: RegID, dst: RegID }, // Set r(dst) to 'true' if r(a) == r(b), if not, set r(dst) to false.
-    Call { start: u8, argc: u8 },          // Call the function at r(0) with argc arguments
-    Tailcall { start: u8, argc: u8 },      // Call the function at r(0) with argc arguments, but doesn't save the caller's registers.
-    CondJmp { reg: RegID, n: u16 },        // Jump forward n ops if r(reg) is falsy
-    Jmp(u16),                              // Jump forward n ops
-    LookUp(RegID),                         // LookUp r(id) in the env and puts the results in r(id)
-    Define { key: RegID, dst: RegID }, // Associate the value r(dst) with the key r(key) in the env
+    Push(u16),    // Push a constant on the top of the stack
+    Call(u8),     // Call the function at stack[len-argc]
+    Tailcall(u8), // Call the function at stack[len-argc], but truncate the stack to ret
+    CondJmp(u16), // Jump forward n ops if the top of the stack is falsy
+    Jmp(u16),     // Jump forward n ops
+    LookUp,       // LookUp the value at the top of the stack and push result
+    Define, // Associate the value at the top with the symbol right under it and set the value back at the top
+    Pop,    // Pop the top of the stack
+    Local(u8), // Push a local on the stack
 }
 
 impl fmt::Debug for Op {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Op::Move { dst, src } => write!(f, "MOVE    r({}) <- r({})", dst, src),
-            Op::Load { dst, const_idx } => write!(f, "LOAD    r({}) <- const({})", dst, const_idx),
-            Op::Add { a, b, dst } => write!(f, "ADD     r({}) <- r({}) + r({})", dst, a, b),
-            Op::Eq { a, b, dst } => write!(f, "EQ      r({}) <- r({}) == r({})", dst, a, b),
-            Op::Call { start, argc } => {
-                write!(f, "CALL    r({}) <- r({})..{}", start, start, argc)
+            Op::Push(const_idx) => write!(f, "LOAD    const({})", const_idx),
+            Op::Call(argc) => {
+                write!(f, "CALL    {}", argc)
             }
-            Op::Tailcall { start, argc } => {
-                write!(f, "TAILCALL     r({}) <- r({})..{}", start, start, argc)
+            Op::Tailcall(argc) => {
+                write!(f, "TAILCALL     {}", argc)
             }
-            Op::CondJmp { reg, n } => write!(f, "CONDJMP r({}) {}", reg, n),
+            Op::CondJmp(n) => write!(f, "CONDJMP {}", n),
             Op::Jmp(n) => write!(f, "JMP     {}", n),
-            Op::LookUp(reg) => write!(f, "LOOKUP  r({})", reg),
-            Op::Define { key, dst } => write!(f, "DEFINE  r({}) r({})", key, dst),
+            Op::LookUp => write!(f, "LOOKUP"),
+            Op::Define => write!(f, "DEFINE"),
+            Op::Pop => write!(f, "POP"),
+            Op::Local(idx) => write!(f, "LOCAL     {}", idx),
         }
     }
 }
@@ -48,30 +46,30 @@ impl fmt::Debug for Op {
 pub struct Chunk {
     pub ops: Vec<Op>,
     pub consts: Vec<Value>,
-    pub used_regs: RegID,
 }
 
 struct CallFrame {
     chunk: Arc<Chunk>,
     pc: usize,
-    saved_regs: Regs,
-    dst: u8,
+    ret: usize,
 }
 
 pub struct VM {
     pc: usize,
+    ret: usize,
     chunk: Arc<Chunk>,
     calls: Vec<CallFrame>,
-    regs: Regs,
+    stack: Vec<Value>,
 }
 
 impl VM {
     pub fn init() -> Self {
         VM {
             pc: 0,
+            ret: 0,
             chunk: Arc::new(Chunk::default()),
             calls: Vec::with_capacity(8),
-            regs: Vec::new(),
+            stack: Vec::with_capacity(16),
         }
     }
 
@@ -85,40 +83,26 @@ impl VM {
         }
     }
 
-    fn tailcall(&mut self, new_chunk: Arc<Chunk>, start: usize, argc: usize) {
-        for i in start..argc {
-            self.regs.swap(i, i + start);
-        }
-        self.regs
-            .resize_with(new_chunk.used_regs as usize, Default::default);
+    fn tailcall(&mut self, new_chunk: Arc<Chunk>, argc: usize) {
         self.chunk = new_chunk;
         self.pc = 0;
+        let args_base = self.stack.len() - argc;
+        // Move the args
+        if args_base != self.ret {
+            for offset in 0..argc {
+                self.stack.swap(self.ret + offset, args_base + offset)
+            }
+        }
+        self.stack.truncate(self.ret + argc);
     }
 
-    fn push_call(&mut self, new_chunk: Arc<Chunk>, start: u8, argc: usize) {
-        #[cfg(debug_assertions)]
-        {
-            println!("SAVING: {:?}", &self.regs);
-            dbg!(&new_chunk);
-        }
-
-        // Create the new register and but the args at the start
-        let mut saved_regs = vec![Value::Nil; new_chunk.used_regs as usize];
-
-        std::mem::swap(&mut saved_regs, &mut self.regs); // SWAP!
-
-        let start_idx: usize = start.into();
-        for offset in 0..argc {
-            std::mem::swap(&mut saved_regs[offset], &mut self.regs[start_idx + offset]);
-        }
-
+    fn push_call(&mut self, new_chunk: Arc<Chunk>, argc: usize) {
         // Swap the chunks!
         let old_chunk = std::mem::replace(&mut self.chunk, new_chunk);
 
         self.calls.push(CallFrame {
-            dst: start,
             chunk: old_chunk,
-            saved_regs,
+            ret: self.ret,
             pc: self.pc,
         });
 
@@ -127,52 +111,38 @@ impl VM {
 
     fn pop_call(&mut self) -> bool {
         if let Some(frame) = self.calls.pop() {
-            let ret = self.regs[0].clone();
-
-            #[cfg(debug_assertions)]
-            println!("RETURN: {:?}", &self.regs);
-
-            self.regs = frame.saved_regs;
+            self.stack.truncate(self.ret);
             self.chunk = frame.chunk;
             self.pc = frame.pc;
-            self.set_reg(frame.dst, ret);
+            self.ret = frame.ret;
             true
         } else {
             false
         }
     }
 
-    #[inline(always)]
-    fn set_reg(&mut self, idx: RegID, val: Value) {
-        self.regs[idx as usize] = val;
-    }
-
-    #[inline(always)]
-    fn reg(&self, idx: RegID) -> Value {
-        self.regs[idx as usize].clone()
-    }
-
-    fn call(&mut self, start: u8, argc: u8, is_tailcall: bool) -> Result<()> {
-        // Set the chunk in reg(0) as current chunk
-        if let Value::Func(f) = self.reg(start) {
+    fn call(&mut self, argc: usize, is_tailcall: bool) -> Result<()> {
+        if let Value::Func(f) = &self.stack[self.stack.len() - argc] {
             match f {
                 ZapFn::Native(f) => {
-                    let args = &self.regs[((start + 1) as usize)..(start as usize + argc as usize)];
+                    let args = &self.stack[(self.stack.len() - argc + 1)..self.stack.len()];
 
                     #[cfg(debug_assertions)]
                     dbg!(&args);
 
                     let ret = (f.func)(args)?;
-                    self.set_reg(start, ret);
+                    self.stack.truncate(self.stack.len() - argc);
+                    self.push(ret);
                 }
-                ZapFn::Chunk(new_chunk) => {
+                ZapFn::Chunk(chunk) => {
+                    let new_chunk = chunk.clone();
                     if is_tailcall {
-                        self.tailcall(new_chunk, start.into(), argc.into());
+                        self.tailcall(new_chunk, argc);
                     } else {
-                        self.push_call(new_chunk, start, argc.into());
+                        self.push_call(new_chunk, argc);
                     }
                     #[cfg(debug_assertions)]
-                    dbg!("{:?}", &self.chunk.consts);
+                    dbg!("{:?}", &self.chunk);
                 }
             }
             Ok(())
@@ -182,43 +152,57 @@ impl VM {
     }
 
     #[inline(always)]
+    fn push(&mut self, val: Value) {
+        self.stack.push(val);
+    }
+
+    #[inline(always)]
+    fn pop(&mut self) -> Value {
+        self.stack.pop().unwrap()
+    }
+
+    #[inline(always)]
     fn jump(&mut self, n: u16) {
         self.pc += n as usize;
     }
 
     #[inline(always)]
-    fn cond_jump(&mut self, reg: RegID, n: u16) {
-        if !self.reg(reg).is_truthy() {
+    fn cond_jump(&mut self, n: u16) {
+        if !self.pop().is_truthy() {
             self.jump(n)
         }
     }
 
     #[inline(always)]
-    fn lookup<E: Env>(&mut self, reg: RegID, env: &mut E) -> Result<()> {
-        self.set_reg(reg, env.get(&self.regs[reg as usize])?);
+    fn lookup<E: Env>(&mut self, env: &mut E) -> Result<()> {
+        let key = &self.pop();
+        self.push(env.get(key)?);
         Ok(())
     }
 
     #[inline(always)]
-    fn define<E: Env>(&mut self, key: RegID, dst: RegID, env: &mut E) -> Result<()> {
-        env.set(&self.regs[key as usize], &self.regs[dst as usize])?;
+    fn define<E: Env>(&mut self, env: &mut E) -> Result<()> {
+        env.set(
+            &self.stack.swap_remove(self.stack.len() - 2),
+            self.stack.last().unwrap(),
+        )?;
         Ok(())
     }
 
     #[inline(always)]
-    fn load_const(&mut self, dst: u8, idx: u16) {
-        self.set_reg(dst, self.chunk.consts[idx as usize].clone());
+    fn push_const(&mut self, idx: u16) {
+        self.push(self.chunk.consts[idx as usize].clone());
     }
 
     #[inline(always)]
-    fn move_op(&mut self, dst: RegID, src: RegID) {
-        self.set_reg(dst, self.regs[src as usize].clone());
+    fn local(&mut self, idx: u8) {
+        self.push(self.stack[self.ret + (idx as usize) + 1].clone());
     }
 
     pub fn run<E: Env>(&mut self, chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
         self.pc = 0;
-        self.regs
-            .resize_with(chunk.used_regs.into(), Default::default);
+        self.ret = 0;
+        self.stack = Vec::with_capacity(8);
         self.chunk = chunk;
 
         #[cfg(debug_assertions)]
@@ -230,31 +214,27 @@ impl VM {
                 println!(
                     "OP: {:<30} {}",
                     format!("{:?}", &op),
-                    format!("REGS: {:?}", &self.regs)
+                    format!("STACK: {:?}", &self.stack)
                 );
 
                 match op {
-                    Op::Move { dst, src } => self.move_op(dst, src),
-                    Op::Load { dst, const_idx } => self.load_const(dst, const_idx),
-                    Op::Add { a, b, dst } => self.set_reg(dst, (self.reg(a) + self.reg(b))?),
-                    Op::Eq { a, b, dst } => {
-                        self.set_reg(dst, Value::Bool(self.reg(a) == self.reg(b)))
-                    }
-                    Op::Call { start, argc } => self.call(start, argc, false)?,
-                    Op::Tailcall { start, argc } => self.call(start, argc, true)?,
-                    Op::CondJmp { reg, n } => self.cond_jump(reg, n),
+                    Op::Push(const_idx) => self.push_const(const_idx),
+                    Op::Call(argc) => self.call(argc.into(), false)?,
+                    Op::Tailcall(argc) => self.call(argc.into(), true)?,
+                    Op::CondJmp(n) => self.cond_jump(n),
                     Op::Jmp(n) => self.jump(n),
-                    Op::LookUp(reg) => self.lookup(reg, env)?,
-                    Op::Define { key, dst } => self.define(key, dst, env)?,
-                }
+                    Op::LookUp => self.lookup(env)?,
+                    Op::Define => self.define(env)?,
+                    Op::Pop => {
+                        self.pop();
+                    }
+                    Op::Local(offset) => self.local(offset),
+                };
             } else if !self.pop_call() {
                 break;
             }
         }
 
-        #[cfg(debug_assertions)]
-        println!("FINAL: {:?}", &self.regs);
-
-        Ok(self.regs[0].clone())
+        Ok(self.pop())
     }
 }
