@@ -8,4 +8,3 @@ edition = "2021"
 [dependencies]
 fxhash = "0.2"
 smartstring = "1.0"
-chrono = "0.4"

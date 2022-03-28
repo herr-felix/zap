@@ -27,18 +27,9 @@ fn is_false(args: &[Value]) -> Result<Value> {
     Ok(Value::Bool(true))
 }
 
-fn plus(args: &[Value]) -> Result<Value> {
-    let mut acc = Value::Number(0.0);
-    for v in args {
-        acc = (v + &acc)?;
-    }
-    Ok(acc)
-}
-
 pub fn load<E: Env>(env: &mut E) {
     env.reg_fn("float?", is_float);
     env.reg_fn("false?", is_false);
-    env.reg_fn("+", plus);
 }
 
 #[cfg(test)]
@@ -72,23 +63,4 @@ pub mod tests {
         test_exp_core("(float? true)", "false");
         test_exp_core("(float? ())", "false");
     }
-
-    #[test]
-    fn add_numbers() {
-        test_exp_core("(+)", "0");
-        test_exp_core("(+ 8)", "8");
-        test_exp_core("(+ 1 2)", "3");
-        test_exp_core("(+ 1 2 2)", "5");
-        test_exp_core("(+ 1 2 3 (+ 4 2))", "12");
-    }
-
-    //    #[test]
-    //    fn eval_eq() {
-    //        test_exp_core("(= 1 2)", "false");
-    //        test_exp_core("(= 1 1 1)", "true");
-    //        test_exp_core("(= nil false)", "false");
-    //        test_exp_core("(= false false)", "true");
-    //        test_exp_core("(= 1 1 1 4 1)", "false");
-    //        test_exp_core("(= 1 1 1 4)", "false");
-    //    }
 }

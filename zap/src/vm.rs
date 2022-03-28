@@ -1,3 +1,4 @@
+use core::ptr;
 use std::fmt;
 use std::sync::Arc;
 
@@ -9,7 +10,7 @@ use crate::zap::{error_msg, Result, Value, ZapFn};
 pub type RegID = u8;
 pub type Regs = Vec<Value>;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum Op {
     Push(u16),    // Push a constant on the top of the stack
     Call(u8),     // Call the function at stack[len-argc]
@@ -20,6 +21,8 @@ pub enum Op {
     Define, // Associate the value at the top with the symbol right under it and set the value back at the top
     Pop,    // Pop the top of the stack
     Local(u8), // Push a local on the stack
+    Add,    // Add 2 elements at the top of the stack and push the result
+    Eq, // Compare 2 elements at the top of the stack and push true if they're equal and false if they aren't
 }
 
 impl fmt::Debug for Op {
@@ -38,6 +41,8 @@ impl fmt::Debug for Op {
             Op::Define => write!(f, "DEFINE"),
             Op::Pop => write!(f, "POP"),
             Op::Local(idx) => write!(f, "LOCAL     {}", idx),
+            Op::Add => write!(f, "ADD"),
+            Op::Eq => write!(f, "EQ"),
         }
     }
 }
@@ -73,24 +78,17 @@ impl VM {
         }
     }
 
-    #[inline(always)]
-    fn get_next_op(&mut self) -> Option<Op> {
-        self.pc += 1;
-        if self.chunk.ops.len() >= self.pc {
-            Some(self.chunk.ops[self.pc - 1].clone())
-        } else {
-            None
-        }
-    }
-
     fn tailcall(&mut self, new_chunk: Arc<Chunk>, argc: usize) {
         self.chunk = new_chunk;
         self.pc = 0;
         let args_base = self.stack.len() - argc;
         // Move the args
         if args_base != self.ret {
-            for offset in 0..argc {
-                self.stack.swap(self.ret + offset, args_base + offset)
+            let ptr = self.stack.as_mut_ptr();
+            unsafe {
+                for offset in 0..argc {
+                    ptr::swap(ptr.add(self.ret + offset), ptr.add(args_base + offset));
+                }
             }
         }
         self.stack.truncate(self.ret + argc);
@@ -106,12 +104,15 @@ impl VM {
             pc: self.pc,
         });
 
+        self.ret = self.stack.len() - argc;
         self.pc = 0;
     }
 
     fn pop_call(&mut self) -> bool {
+        let tos = self.stack.len() - 1;
+        self.stack.swap(self.ret, tos);
+        self.stack.truncate(self.ret + 1);
         if let Some(frame) = self.calls.pop() {
-            self.stack.truncate(self.ret);
             self.chunk = frame.chunk;
             self.pc = frame.pc;
             self.ret = frame.ret;
@@ -122,13 +123,14 @@ impl VM {
     }
 
     fn call(&mut self, argc: usize, is_tailcall: bool) -> Result<()> {
-        if let Value::Func(f) = &self.stack[self.stack.len() - argc] {
+        if let Value::Func(f) = unsafe { &self.stack.get_unchecked(self.stack.len() - argc) } {
             match f {
                 ZapFn::Native(f) => {
-                    let args = &self.stack[(self.stack.len() - argc + 1)..self.stack.len()];
-
-                    #[cfg(debug_assertions)]
-                    dbg!(&args);
+                    let args = unsafe {
+                        &self
+                            .stack
+                            .get_unchecked((self.stack.len() - argc + 1)..self.stack.len())
+                    };
 
                     let ret = (f.func)(args)?;
                     self.stack.truncate(self.stack.len() - argc);
@@ -141,8 +143,6 @@ impl VM {
                     } else {
                         self.push_call(new_chunk, argc);
                     }
-                    #[cfg(debug_assertions)]
-                    dbg!("{:?}", &self.chunk);
                 }
             }
             Ok(())
@@ -154,6 +154,11 @@ impl VM {
     #[inline(always)]
     fn push(&mut self, val: Value) {
         self.stack.push(val);
+    }
+
+    #[inline(always)]
+    fn pop_void(&mut self) {
+        self.stack.truncate(self.stack.len() - 1);
     }
 
     #[inline(always)]
@@ -169,7 +174,7 @@ impl VM {
     #[inline(always)]
     fn cond_jump(&mut self, n: u16) {
         if !self.pop().is_truthy() {
-            self.jump(n)
+            self.jump(n);
         }
     }
 
@@ -196,26 +201,30 @@ impl VM {
 
     #[inline(always)]
     fn local(&mut self, idx: u8) {
-        self.push(self.stack[self.ret + (idx as usize) + 1].clone());
+        self.push(unsafe { self.stack.get_unchecked(self.ret + (idx as usize) + 1) }.clone());
     }
 
+    #[inline(always)]
     pub fn run<E: Env>(&mut self, chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
         self.pc = 0;
         self.ret = 0;
         self.stack = Vec::with_capacity(8);
         self.chunk = chunk;
 
-        #[cfg(debug_assertions)]
-        dbg!(&self.chunk.consts);
-
         loop {
-            if let Some(op) = self.get_next_op() {
+            if self.chunk.ops.len() > self.pc {
+                let op = unsafe { *self.chunk.ops.get_unchecked(self.pc) };
+                self.pc += 1;
+
                 #[cfg(debug_assertions)]
-                println!(
-                    "OP: {:<30} {}",
-                    format!("{:?}", &op),
-                    format!("STACK: {:?}", &self.stack)
-                );
+                #[allow(clippy::format_in_format_args)]
+                {
+                    println!(
+                        "OP: {:<30} {}",
+                        format!("{:?}", &op),
+                        format!("STACK: {:?}", &self.stack)
+                    );
+                }
 
                 match op {
                     Op::Push(const_idx) => self.push_const(const_idx),
@@ -226,9 +235,21 @@ impl VM {
                     Op::LookUp => self.lookup(env)?,
                     Op::Define => self.define(env)?,
                     Op::Pop => {
-                        self.pop();
+                        self.pop_void();
                     }
                     Op::Local(offset) => self.local(offset),
+                    Op::Add => {
+                        let sum = (&self.pop() + &self.pop())?;
+                        self.push(sum);
+                    }
+                    Op::Eq => {
+                        let res = unsafe {
+                            self.stack.get_unchecked(self.stack.len() - 1)
+                                == self.stack.get_unchecked(self.stack.len() - 2)
+                        };
+                        self.stack.truncate(self.stack.len() - 2);
+                        self.push(Value::Bool(res));
+                    }
                 };
             } else if !self.pop_call() {
                 break;

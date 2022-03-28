@@ -2,7 +2,6 @@ use crate::env::{symbols, Env};
 use crate::vm::{Chunk, Op, RegID};
 use crate::zap::{error_msg, Result, Symbol, Value, ZapFn, ZapList};
 use fxhash::FxHashMap;
-use std::cmp::max;
 use std::sync::Arc;
 
 // The compiler takes the expression returned by the reader and return an array of bytecodes
@@ -19,6 +18,8 @@ enum Form {
     Do(ZapList, usize),
     Define,
     Return(Chunk),
+    Plus,
+    Equal,
 }
 
 struct Compiler<'a, E: Env> {
@@ -136,7 +137,7 @@ impl<'a, E: Env> Compiler<'a, E> {
             }
             Value::Symbol(symbols::DEFINE) => {
                 if list.len() < 2 {
-                    return Err(error_msg("A def form must 2 parameters"));
+                    return Err(error_msg("A def form must have 2 parameters"));
                 }
                 self.push(&list[1])?;
                 self.forms.push(Form::Define);
@@ -149,6 +150,17 @@ impl<'a, E: Env> Compiler<'a, E> {
                 let cond = list[1].clone();
                 self.forms.push(Form::IfCond(list));
                 self.forms.push(Form::Value(cond));
+            }
+            Value::Symbol(symbols::EQUAL) => {
+                if list.len() != 3 {
+                    return Err(error_msg("A = form must have 2 parameters"));
+                }
+                self.forms.push(Form::Equal);
+                self.forms.push(Form::List(list, 1));
+            }
+            Value::Symbol(symbols::PLUS) => {
+                self.forms.push(Form::Plus);
+                self.forms.push(Form::List(list, 1));
             }
             _ => {
                 self.forms.push(Form::Apply);
@@ -190,19 +202,16 @@ impl<'a, E: Env> Compiler<'a, E> {
         Ok(())
     }
 
-    pub fn eval_define(&mut self) -> Result<()> {
+    pub fn eval_define(&mut self) {
         self.emit(Op::Define);
-        Ok(())
     }
 
-    pub fn apply(&mut self) -> Result<()> {
+    pub fn apply(&mut self) {
         if self.is_last_exp() {
             self.emit(Op::Tailcall(self.argc));
         } else {
             self.emit(Op::Call(self.argc));
         }
-
-        Ok(())
     }
 
     pub fn eval_then_branch(&mut self, args: ZapList) {
@@ -212,7 +221,7 @@ impl<'a, E: Env> Compiler<'a, E> {
         self.forms.push(Form::Value(branch));
     }
 
-    pub fn eval_else_branch(&mut self, args: ZapList, chunk: Vec<Op>) {
+    pub fn eval_else_branch(&mut self, args: &ZapList, chunk: Vec<Op>) {
         let branch = args[3].clone();
         self.forms
             .push(Form::IfElse(chunk, std::mem::take(&mut self.chunk.ops)));
@@ -236,6 +245,28 @@ impl<'a, E: Env> Compiler<'a, E> {
         self.chunk.ops.extend(else_branch);
 
         Ok(())
+    }
+
+    pub fn eval_plus(&mut self) -> Result<()> {
+        let argc = self.argc - 1;
+        match argc {
+            0 => {
+                // Push 0 on the stack
+                let const_idx = self.get_const_idx(&Value::Number(0.0))?;
+                self.emit(Op::Push(const_idx));
+            }
+            1 => {}
+            _ => {
+                for _ in 1..argc {
+                    self.emit(Op::Add);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn eval_equal(&mut self) {
+        self.emit(Op::Eq);
     }
 
     pub fn wrap_fn(&mut self, mut chunk: Chunk) {
@@ -270,7 +301,7 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
                 }
             }
             Form::Apply => {
-                compiler.apply()?;
+                compiler.apply();
             }
             Form::IfCond(args) => {
                 // Then branch
@@ -278,17 +309,23 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
             }
             Form::IfThen(args, chunk) => {
                 // Else branch
-                compiler.eval_else_branch(args, chunk);
+                compiler.eval_else_branch(&args, chunk);
             }
             Form::IfElse(chunk, then_branch) => {
                 // Combine the branches in the chunk
                 compiler.combine_branches(chunk, then_branch)?;
             }
+            Form::Plus => {
+                compiler.eval_plus()?;
+            }
+            Form::Equal => {
+                compiler.eval_equal();
+            }
             Form::Do(list, idx) => {
                 compiler.eval_next_in_do(list, idx);
             }
             Form::Define => {
-                compiler.eval_define()?;
+                compiler.eval_define();
             }
             Form::Return(chunk) => compiler.wrap_fn(chunk),
         }

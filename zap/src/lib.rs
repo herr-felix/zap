@@ -106,4 +106,20 @@ pub mod tests {
     fn eval_fn() {
         test_exp("((fn (x) x) 4)", "4");
     }
+
+    #[test]
+    fn add_numbers() {
+        test_exp("(+)", "0");
+        test_exp("(+ 8)", "8");
+        test_exp("(+ 1 2)", "3");
+        test_exp("(+ 1 2 2)", "5");
+        test_exp("(+ 1 2 3 (+ 4 2))", "12");
+    }
+
+    #[test]
+    fn eval_eq() {
+        test_exp("(= 1 2)", "false");
+        test_exp("(= nil false)", "false");
+        test_exp("(= false false)", "true");
+    }
 }

@@ -33,6 +33,7 @@ impl Value {
         Arc::new(list)
     }
 
+    #[inline(always)]
     pub fn is_truthy(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
     }
@@ -121,7 +122,7 @@ impl ZapFn {
 impl PartialEq for ZapFn {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (ZapFn::Native(a), ZapFn::Native(b)) => a.name == b.name,
+            (ZapFn::Native(a), ZapFn::Native(b)) => Arc::ptr_eq(a, b),
             (ZapFn::Chunk(a), ZapFn::Chunk(b)) => Arc::ptr_eq(a, b),
             (_, _) => false,
         }
