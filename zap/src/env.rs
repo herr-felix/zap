@@ -65,6 +65,7 @@ impl Default for SandboxEnv {
 }
 
 impl Env for SandboxEnv {
+    #[inline(always)]
     fn get(&self, key: &Value) -> Result<Value> {
         match key {
             Value::Symbol(id) => match self.scope.get(id) {

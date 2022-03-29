@@ -28,15 +28,15 @@ pub enum Op {
 impl fmt::Debug for Op {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Op::Push(const_idx) => write!(f, "LOAD    const({})", const_idx),
+            Op::Push(const_idx) => write!(f, "LOAD      const({})", const_idx),
             Op::Call(argc) => {
-                write!(f, "CALL    {}", argc)
+                write!(f, "CALL      argc({})", argc)
             }
             Op::Tailcall(argc) => {
-                write!(f, "TAILCALL     {}", argc)
+                write!(f, "TAILCALL  argc({})", argc)
             }
-            Op::CondJmp(n) => write!(f, "CONDJMP {}", n),
-            Op::Jmp(n) => write!(f, "JMP     {}", n),
+            Op::CondJmp(n) => write!(f, "CONDJMP   {}", n),
+            Op::Jmp(n) => write!(f, "JMP       {}", n),
             Op::LookUp => write!(f, "LOOKUP"),
             Op::Define => write!(f, "DEFINE"),
             Op::Pop => write!(f, "POP"),
@@ -132,9 +132,9 @@ impl VM {
                             .get_unchecked((self.stack.len() - argc + 1)..self.stack.len())
                     };
 
-                    let ret = (f.func)(args)?;
-                    self.stack.truncate(self.stack.len() - argc);
-                    self.push(ret);
+                    let mut ret = (f.func)(args)?;
+                    self.stack.truncate(self.stack.len() - argc + 1);
+                    std::mem::swap(self.stack.last_mut().unwrap(), &mut ret);
                 }
                 ZapFn::Chunk(chunk) => {
                     let new_chunk = chunk.clone();
@@ -180,8 +180,9 @@ impl VM {
 
     #[inline(always)]
     fn lookup<E: Env>(&mut self, env: &mut E) -> Result<()> {
-        let key = &self.pop();
-        self.push(env.get(key)?);
+        let tos = self.stack.last_mut().unwrap();
+        let mut val = env.get(tos)?;
+        std::mem::swap(tos, &mut val);
         Ok(())
     }
 
@@ -239,16 +240,20 @@ impl VM {
                     }
                     Op::Local(offset) => self.local(offset),
                     Op::Add => {
-                        let sum = (&self.pop() + &self.pop())?;
-                        self.push(sum);
+                        let len = self.stack.len();
+                        let mut sum = unsafe {
+                            self.stack.get_unchecked(len - 1) + self.stack.get_unchecked(len - 2)
+                        }?;
+                        std::mem::swap(unsafe { self.stack.get_unchecked_mut(len - 2) }, &mut sum);
+                        self.pop_void();
                     }
                     Op::Eq => {
-                        let res = unsafe {
-                            self.stack.get_unchecked(self.stack.len() - 1)
-                                == self.stack.get_unchecked(self.stack.len() - 2)
-                        };
-                        self.stack.truncate(self.stack.len() - 2);
-                        self.push(Value::Bool(res));
+                        let len = self.stack.len();
+                        let mut res = Value::Bool(unsafe {
+                            self.stack.get_unchecked(len - 1) == self.stack.get_unchecked(len - 2)
+                        });
+                        std::mem::swap(unsafe { self.stack.get_unchecked_mut(len - 2) }, &mut res);
+                        self.pop_void();
                     }
                 };
             } else if !self.pop_call() {
