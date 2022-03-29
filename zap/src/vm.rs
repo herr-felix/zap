@@ -12,16 +12,18 @@ pub type Regs = Vec<Value>;
 
 #[derive(Clone, Copy)]
 pub enum Op {
-    Push(u16),    // Push a constant on the top of the stack
-    Call(u8),     // Call the function at stack[len-argc]
-    Tailcall(u8), // Call the function at stack[len-argc], but truncate the stack to ret
-    CondJmp(u16), // Jump forward n ops if the top of the stack is falsy
-    Jmp(u16),     // Jump forward n ops
-    LookUp,       // LookUp the value at the top of the stack and push result
+    Push(u16),     // Push a constant on the top of the stack
+    Call(u8),      // Call the function at stack[len-argc]
+    Tailcall(u8),  // Call the function at stack[len-argc], but truncate the stack to ret
+    CondJmp(u16),  // Jump forward n ops if the top of the stack is falsy
+    Jmp(u16),      // Jump forward n ops
+    LookUp(u16),   // LookUp the value of a constant and push result
     Define, // Associate the value at the top with the symbol right under it and set the value back at the top
     Pop,    // Pop the top of the stack
     Local(u8), // Push a local on the stack
+    AddConst(u16), // Add the element at the top of the stack and a constant and push the result
     Add,    // Add 2 elements at the top of the stack and push the result
+    EqConst(u16), // Compare the element at the top of the stack with a constant push true if they're equal and false if they aren't
     Eq, // Compare 2 elements at the top of the stack and push true if they're equal and false if they aren't
 }
 
@@ -37,11 +39,13 @@ impl fmt::Debug for Op {
             }
             Op::CondJmp(n) => write!(f, "CONDJMP   {}", n),
             Op::Jmp(n) => write!(f, "JMP       {}", n),
-            Op::LookUp => write!(f, "LOOKUP"),
+            Op::LookUp(idx) => write!(f, "LOOKUP    const({})", idx),
             Op::Define => write!(f, "DEFINE"),
             Op::Pop => write!(f, "POP"),
             Op::Local(idx) => write!(f, "LOCAL     {}", idx),
+            Op::AddConst(idx) => write!(f, "ADDCONST  const({})", idx),
             Op::Add => write!(f, "ADD"),
+            Op::EqConst(idx) => write!(f, "EQCONST   const({})", idx),
             Op::Eq => write!(f, "EQ"),
         }
     }
@@ -179,10 +183,9 @@ impl VM {
     }
 
     #[inline(always)]
-    fn lookup<E: Env>(&mut self, env: &mut E) -> Result<()> {
-        let tos = self.stack.last_mut().unwrap();
-        let mut val = env.get(tos)?;
-        std::mem::swap(tos, &mut val);
+    fn lookup<E: Env>(&mut self, idx: u16, env: &mut E) -> Result<()> {
+        let val = env.get(self.get_const(idx))?;
+        self.stack.push(val);
         Ok(())
     }
 
@@ -196,8 +199,13 @@ impl VM {
     }
 
     #[inline(always)]
+    fn get_const(&self, idx: u16) -> &Value {
+        unsafe { self.chunk.consts.get_unchecked(idx as usize) }
+    }
+
+    #[inline(always)]
     fn push_const(&mut self, idx: u16) {
-        self.push(self.chunk.consts[idx as usize].clone());
+        self.push(self.get_const(idx).clone());
     }
 
     #[inline(always)]
@@ -233,12 +241,18 @@ impl VM {
                     Op::Tailcall(argc) => self.call(argc.into(), true)?,
                     Op::CondJmp(n) => self.cond_jump(n),
                     Op::Jmp(n) => self.jump(n),
-                    Op::LookUp => self.lookup(env)?,
+                    Op::LookUp(idx) => self.lookup(idx, env)?,
                     Op::Define => self.define(env)?,
                     Op::Pop => {
                         self.pop_void();
                     }
                     Op::Local(offset) => self.local(offset),
+                    Op::AddConst(const_idx) => {
+                        let a = self.stack.last_mut().unwrap();
+                        let b = unsafe { self.chunk.consts.get_unchecked(const_idx as usize) };
+                        let mut sum = (&*a + b)?;
+                        std::mem::swap(a, &mut sum);
+                    }
                     Op::Add => {
                         let len = self.stack.len();
                         let mut sum = unsafe {
@@ -246,6 +260,12 @@ impl VM {
                         }?;
                         std::mem::swap(unsafe { self.stack.get_unchecked_mut(len - 2) }, &mut sum);
                         self.pop_void();
+                    }
+                    Op::EqConst(const_idx) => {
+                        let a = self.stack.last_mut().unwrap();
+                        let b = unsafe { self.chunk.consts.get_unchecked(const_idx as usize) };
+                        let mut res = Value::Bool(a == b);
+                        std::mem::swap(a, &mut res);
                     }
                     Op::Eq => {
                         let len = self.stack.len();

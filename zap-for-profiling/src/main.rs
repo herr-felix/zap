@@ -18,7 +18,7 @@ fn main() {
     reader.tokenize(src);
 
     while let Ok(Some(form)) = reader.read_ast(&mut env) {
-        let chunk = compile(form, &mut env).unwrap();
+        let chunk = compile(form).unwrap();
         if let Ok(result) = vm.run(chunk, &mut env) {
             println!("{}", result.pr_str(&mut env));
         }

@@ -48,7 +48,7 @@ pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
                         let env2 = &mut env;
 
                         let evaluated = task::block_in_place(move || {
-                            let chunk = compile(form, env2)?;
+                            let chunk = compile(form)?;
                             let start = Instant::now();
                             let res = vm.run(chunk, env2)?;
                             let end = Instant::now();

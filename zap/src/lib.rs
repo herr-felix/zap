@@ -27,7 +27,7 @@ pub mod tests {
         let mut vm = VM::init();
 
         let mut ast = reader.read_ast(&mut env)?;
-        let mut chunk = compile(ast.unwrap(), &mut env)?;
+        let mut chunk = compile(ast.unwrap())?;
         let mut res = vm.run(chunk, &mut env)?;
 
         loop {
@@ -35,7 +35,7 @@ pub mod tests {
             if ast.is_none() {
                 return Ok(String::from(res.to_string(&mut env)));
             }
-            chunk = compile(ast.unwrap(), &mut env)?;
+            chunk = compile(ast.unwrap())?;
             res = vm.run(chunk, &mut env)?;
         }
     }

@@ -1,4 +1,4 @@
-use crate::env::{symbols, Env};
+use crate::env::symbols;
 use crate::vm::{Chunk, Op, RegID};
 use crate::zap::{error_msg, Result, Symbol, Value, ZapFn, ZapList};
 use fxhash::FxHashMap;
@@ -18,22 +18,22 @@ enum Form {
     Do(ZapList, usize),
     Define,
     Return(Chunk),
-    Plus,
+    AddMany(ZapList, usize),
+    Add,
     Equal,
+    EqualConst(u16),
 }
 
-struct Compiler<'a, E: Env> {
-    env: &'a mut E,
+struct Compiler {
     chunk: Chunk,
     forms: Vec<Form>,
     argc: u8,
     locals: Vec<FxHashMap<Symbol, u8>>,
 }
 
-impl<'a, E: Env> Compiler<'a, E> {
-    pub fn init(ast: Value, env: &'a mut E) -> Self {
+impl Compiler {
+    pub fn init(ast: Value) -> Self {
         Compiler {
-            env,
             chunk: Chunk::default(),
             forms: vec![Form::Value(ast)],
             argc: 0,
@@ -155,12 +155,38 @@ impl<'a, E: Env> Compiler<'a, E> {
                 if list.len() != 3 {
                     return Err(error_msg("A = form must have 2 parameters"));
                 }
-                self.forms.push(Form::Equal);
-                self.forms.push(Form::List(list, 1));
+
+                if is_const(&list[1]) == is_const(&list[2]) {
+                    // Compile time compare on constants
+                    self.push(&Value::Bool(list[1] == list[2]))?;
+                } else if is_const(&list[1]) {
+                    let idx = self.get_const_idx(&list[1].clone())?;
+                    self.forms.push(Form::EqualConst(idx));
+                    self.forms.push(Form::Value(list[2].clone()));
+                } else if is_const(&list[2]) {
+                    let idx = self.get_const_idx(&list[2].clone())?;
+                    self.forms.push(Form::EqualConst(idx));
+                    self.forms.push(Form::Value(list[1].clone()));
+                } else {
+                    self.forms.push(Form::Equal);
+                    self.forms.push(Form::Value(list[1].clone()));
+                    self.forms.push(Form::Value(list[2].clone()));
+                }
             }
             Value::Symbol(symbols::PLUS) => {
-                self.forms.push(Form::Plus);
-                self.forms.push(Form::List(list, 1));
+                match list.len() {
+                    1 => {
+                        // Push 0 on the stack
+                        let const_idx = self.get_const_idx(&Value::Number(0.0))?;
+                        self.emit(Op::Push(const_idx));
+                    }
+                    2 => {
+                        self.forms.push(Form::Value(list[1].clone()));
+                    }
+                    _ => {
+                        self.forms.push(Form::AddMany(list, 1));
+                    }
+                }
             }
             _ => {
                 self.forms.push(Form::Apply);
@@ -196,8 +222,8 @@ impl<'a, E: Env> Compiler<'a, E> {
         if let Some(offset) = self.get_local(s) {
             self.emit(Op::Local(offset));
         } else {
-            self.push(&Value::Symbol(s))?;
-            self.emit(Op::LookUp);
+            let idx = self.get_const_idx(&Value::Symbol(s))?;
+            self.emit(Op::LookUp(idx));
         }
         Ok(())
     }
@@ -247,26 +273,34 @@ impl<'a, E: Env> Compiler<'a, E> {
         Ok(())
     }
 
-    pub fn eval_plus(&mut self) -> Result<()> {
-        let argc = self.argc - 1;
-        match argc {
-            0 => {
-                // Push 0 on the stack
-                let const_idx = self.get_const_idx(&Value::Number(0.0))?;
-                self.emit(Op::Push(const_idx));
-            }
-            1 => {}
-            _ => {
-                for _ in 1..argc {
-                    self.emit(Op::Add);
-                }
+    pub fn eval_next_in_add(&mut self, list: &ZapList, idx: usize) -> Result<()> {
+        if idx == 1 {
+            self.forms.push(Form::AddMany(list.clone(), idx + 1));
+            self.forms.push(Form::Value(list[idx].clone()));
+        } else if list.len() > idx {
+            self.forms.push(Form::AddMany(list.clone(), idx + 1));
+            if is_const(&list[idx]) {
+                // It's a constant
+                let const_idx = self.get_const_idx(&list[idx])?;
+                self.emit(Op::AddConst(const_idx));
+            } else {
+                self.forms.push(Form::Add);
+                self.forms.push(Form::Value(list[idx].clone()));
             }
         }
         Ok(())
     }
 
+    pub fn eval_add(&mut self) {
+        self.emit(Op::Add);
+    }
+
     pub fn eval_equal(&mut self) {
         self.emit(Op::Eq);
+    }
+
+    pub fn eval_equal_const(&mut self, idx: u16) {
+        self.emit(Op::EqConst(idx));
     }
 
     pub fn wrap_fn(&mut self, mut chunk: Chunk) {
@@ -277,8 +311,8 @@ impl<'a, E: Env> Compiler<'a, E> {
     }
 }
 
-pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
-    let mut compiler = Compiler::init(ast, env);
+pub fn compile(ast: Value) -> Result<Arc<Chunk>> {
+    let mut compiler = Compiler::init(ast);
 
     while let Some(form) = compiler.get_form() {
         match form {
@@ -315,8 +349,14 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
                 // Combine the branches in the chunk
                 compiler.combine_branches(chunk, then_branch)?;
             }
-            Form::Plus => {
-                compiler.eval_plus()?;
+            Form::AddMany(list, idx) => {
+                compiler.eval_next_in_add(&list, idx)?;
+            }
+            Form::Add => {
+                compiler.eval_add();
+            }
+            Form::EqualConst(idx) => {
+                compiler.eval_equal_const(idx);
             }
             Form::Equal => {
                 compiler.eval_equal();
@@ -332,4 +372,8 @@ pub fn compile<E: Env>(ast: Value, env: &mut E) -> Result<Arc<Chunk>> {
     }
 
     Ok(compiler.chunk())
+}
+
+fn is_const(val: &Value) -> bool {
+    !matches!(val, Value::List(_) | Value::Symbol(_))
 }
