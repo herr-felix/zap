@@ -1,7 +1,6 @@
 use std::time::Instant;
 
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::task;
 
 use zap::compiler::compile;
@@ -10,9 +9,10 @@ use zap::reader::Reader;
 use zap::vm::VM;
 use zap::ZapErr;
 
-pub async fn start_repl(stream: TcpStream) -> io::Result<()> {
-    let (mut input, mut output) = stream.into_split();
-
+pub async fn start_repl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    input: &mut R,
+    output: &mut W,
+) -> io::Result<()> {
     let mut buf = [0; 1024];
 
     let mut reader = Reader::new();

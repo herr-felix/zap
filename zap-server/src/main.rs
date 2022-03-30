@@ -5,9 +5,9 @@ mod repl;
 //#[global_allocator]
 //static ALLOC: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 
-use tokio::net::TcpListener;
-
 use crate::repl::start_repl;
+use std::fs::remove_file;
+use tokio::net::UnixListener;
 
 //#[cfg(not(target_env = "msvc"))]
 //#[global_allocator]
@@ -15,15 +15,18 @@ use crate::repl::start_repl;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:2020").await.unwrap();
+    let socket_file = "./zap.sock";
+    remove_file(socket_file).ok(); // Cleanup the file
+    let listener = UnixListener::bind(socket_file).unwrap();
 
     println!("Server listening.");
 
     // accept connections and process them serially
     loop {
-        let (socket, _) = listener.accept().await.unwrap();
+        let (stream, _) = listener.accept().await.unwrap();
         tokio::spawn(async move {
-            start_repl(socket).await.ok();
+            let (mut input, mut output) = stream.into_split();
+            start_repl(&mut input, &mut output).await.ok();
         });
     }
 }
