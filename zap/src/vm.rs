@@ -20,7 +20,7 @@ pub enum Op {
     LookUp(u16),   // LookUp the value of a constant and push result
     Define, // Associate the value at the top with the symbol right under it and set the value back at the top
     Pop,    // Pop the top of the stack
-    Local(u8), // Push a local on the stack
+    Load(u8), // Push a local on the stack
     AddConst(u16), // Add the element at the top of the stack and a constant and push the result
     Add,    // Add 2 elements at the top of the stack and push the result
     EqConst(u16), // Compare the element at the top of the stack with a constant push true if they're equal and false if they aren't
@@ -42,7 +42,7 @@ impl fmt::Debug for Op {
             Op::LookUp(idx) => write!(f, "LOOKUP    const({})", idx),
             Op::Define => write!(f, "DEFINE"),
             Op::Pop => write!(f, "POP"),
-            Op::Local(idx) => write!(f, "LOCAL     {}", idx),
+            Op::Load(idx) => write!(f, "LOCAL     {}", idx),
             Op::AddConst(idx) => write!(f, "ADDCONST  const({})", idx),
             Op::Add => write!(f, "ADD"),
             Op::EqConst(idx) => write!(f, "EQCONST   const({})", idx),
@@ -214,6 +214,43 @@ impl VM {
     }
 
     #[inline(always)]
+    fn add_const(&mut self, idx: u16) -> Result<()> {
+        let a = self.stack.last_mut().unwrap();
+        let b = unsafe { self.chunk.consts.get_unchecked(idx as usize) };
+        let mut sum = (&*a + b)?;
+        std::mem::swap(a, &mut sum);
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn add(&mut self) -> Result<()> {
+        let len = self.stack.len();
+        let mut sum =
+            unsafe { self.stack.get_unchecked(len - 1) + self.stack.get_unchecked(len - 2) }?;
+        std::mem::swap(unsafe { self.stack.get_unchecked_mut(len - 2) }, &mut sum);
+        self.pop_void();
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn eq_const(&mut self, idx: u16) {
+        let a = self.stack.last_mut().unwrap();
+        let b = unsafe { self.chunk.consts.get_unchecked(idx as usize) };
+        let mut res = Value::Bool(a == b);
+        std::mem::swap(a, &mut res);
+    }
+
+    #[inline(always)]
+    fn eq(&mut self) {
+        let len = self.stack.len();
+        let mut res = Value::Bool(unsafe {
+            self.stack.get_unchecked(len - 1) == self.stack.get_unchecked(len - 2)
+        });
+        std::mem::swap(unsafe { self.stack.get_unchecked_mut(len - 2) }, &mut res);
+        self.pop_void();
+    }
+
+    #[inline(always)]
     pub fn run<E: Env>(&mut self, chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
         self.pc = 0;
         self.ret = 0;
@@ -246,35 +283,11 @@ impl VM {
                     Op::Pop => {
                         self.pop_void();
                     }
-                    Op::Local(offset) => self.local(offset),
-                    Op::AddConst(const_idx) => {
-                        let a = self.stack.last_mut().unwrap();
-                        let b = unsafe { self.chunk.consts.get_unchecked(const_idx as usize) };
-                        let mut sum = (&*a + b)?;
-                        std::mem::swap(a, &mut sum);
-                    }
-                    Op::Add => {
-                        let len = self.stack.len();
-                        let mut sum = unsafe {
-                            self.stack.get_unchecked(len - 1) + self.stack.get_unchecked(len - 2)
-                        }?;
-                        std::mem::swap(unsafe { self.stack.get_unchecked_mut(len - 2) }, &mut sum);
-                        self.pop_void();
-                    }
-                    Op::EqConst(const_idx) => {
-                        let a = self.stack.last_mut().unwrap();
-                        let b = unsafe { self.chunk.consts.get_unchecked(const_idx as usize) };
-                        let mut res = Value::Bool(a == b);
-                        std::mem::swap(a, &mut res);
-                    }
-                    Op::Eq => {
-                        let len = self.stack.len();
-                        let mut res = Value::Bool(unsafe {
-                            self.stack.get_unchecked(len - 1) == self.stack.get_unchecked(len - 2)
-                        });
-                        std::mem::swap(unsafe { self.stack.get_unchecked_mut(len - 2) }, &mut res);
-                        self.pop_void();
-                    }
+                    Op::Load(offset) => self.local(offset),
+                    Op::AddConst(const_idx) => self.add_const(const_idx)?,
+                    Op::Add => self.add()?,
+                    Op::EqConst(const_idx) => self.eq_const(const_idx),
+                    Op::Eq => self.eq(),
                 };
             } else if !self.pop_call() {
                 break;

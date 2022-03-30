@@ -220,7 +220,7 @@ impl Compiler {
 
     pub fn eval_symbol(&mut self, s: Symbol) -> Result<()> {
         if let Some(offset) = self.get_local(s) {
-            self.emit(Op::Local(offset));
+            self.emit(Op::Load(offset));
         } else {
             let idx = self.get_const_idx(&Value::Symbol(s))?;
             self.emit(Op::LookUp(idx));
