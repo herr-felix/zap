@@ -14,7 +14,7 @@ pub mod tests {
     use crate::compiler::compile;
     use crate::env::SandboxEnv;
     use crate::reader::Reader;
-    use crate::vm::{Op, VM};
+    use crate::vm::{self, Op};
     use crate::zap::{Result, String, Value, ZapErr};
 
     pub fn run_exp(src: &str, mut env: SandboxEnv) -> Result<String> {
@@ -24,11 +24,9 @@ pub mod tests {
         reader.tokenize(src);
         reader.flush_token();
 
-        let mut vm = VM::init();
-
         let mut ast = reader.read_ast(&mut env)?;
         let mut chunk = compile(ast.unwrap())?;
-        let mut res = vm.run(chunk, &mut env)?;
+        let mut res = vm::run(chunk, &mut env)?;
 
         loop {
             ast = reader.read_ast(&mut env)?;
@@ -36,7 +34,7 @@ pub mod tests {
                 return Ok(String::from(res.to_string(&mut env)));
             }
             chunk = compile(ast.unwrap())?;
-            res = vm.run(chunk, &mut env)?;
+            res = vm::run(chunk, &mut env)?;
         }
     }
 
@@ -47,7 +45,7 @@ pub mod tests {
 
     #[test]
     fn op_size() {
-        assert_eq!(std::mem::size_of::<Op>(), 4)
+        assert_eq!(std::mem::size_of::<Op>(), 8)
     }
 
     #[test]

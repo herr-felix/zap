@@ -1,5 +1,5 @@
 use crate::env::symbols;
-use crate::vm::{Chunk, Op, RegID};
+use crate::vm::{Chunk, Op};
 use crate::zap::{error_msg, Result, Symbol, Value, ZapFn, ZapList};
 use fxhash::FxHashMap;
 use std::sync::Arc;
@@ -66,11 +66,13 @@ impl Compiler {
         }
     }
 
-    fn get_local(&mut self, s: Symbol) -> Option<RegID> {
+    fn get_local(&mut self, s: Symbol) -> Option<u8> {
         self.locals.last().unwrap().get(&s).copied()
     }
 
-    pub fn chunk(self) -> Arc<Chunk> {
+    pub fn chunk(mut self) -> Arc<Chunk> {
+        self.chunk.ops.shrink_to_fit();
+        self.chunk.consts.shrink_to_fit();
         Arc::new(self.chunk)
     }
 
@@ -222,8 +224,7 @@ impl Compiler {
         if let Some(offset) = self.get_local(s) {
             self.emit(Op::Load(offset));
         } else {
-            let idx = self.get_const_idx(&Value::Symbol(s))?;
-            self.emit(Op::LookUp(idx));
+            self.emit(Op::LookUp(s));
         }
         Ok(())
     }

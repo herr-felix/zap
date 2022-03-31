@@ -6,7 +6,7 @@ use tokio::task;
 use zap::compiler::compile;
 use zap::env::SandboxEnv;
 use zap::reader::Reader;
-use zap::vm::VM;
+use zap::vm;
 use zap::ZapErr;
 
 pub async fn start_repl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
@@ -19,8 +19,6 @@ pub async fn start_repl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     let mut env = SandboxEnv::default();
 
     zap_core::load(&mut env);
-
-    let mut vm = VM::init();
 
     loop {
         output.write("> ".as_bytes()).await?;
@@ -44,13 +42,12 @@ pub async fn start_repl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             loop {
                 match reader.read_ast(&mut env) {
                     Ok(Some(form)) => {
-                        let vm = &mut vm;
                         let env2 = &mut env;
 
                         let evaluated = task::block_in_place(move || {
                             let chunk = compile(form)?;
                             let start = Instant::now();
-                            let res = vm.run(chunk, env2)?;
+                            let res = vm::run(chunk, env2)?;
                             let end = Instant::now();
                             println!("Evaluated in {:?}\n", end - start);
                             Ok(res)

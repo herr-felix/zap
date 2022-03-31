@@ -1,7 +1,7 @@
 use crate::zap::{error_msg, Result, String, Symbol, Value, ZapFn};
 use fxhash::FxHashMap;
 
-pub type Scope = FxHashMap<Symbol, Value>;
+pub type Scope = Vec<Option<Value>>;
 type SymbolTable = FxHashMap<String, Symbol>;
 
 pub mod symbols {
@@ -37,6 +37,7 @@ pub mod symbols {
 }
 
 pub trait Env {
+    fn get_by_id(&self, id: Symbol) -> Result<Value>;
     fn get(&self, key: &Value) -> Result<Value>;
     fn set(&mut self, key: &Value, val: &Value) -> Result<()>;
     fn reg_symbol(&mut self, s: String) -> Value;
@@ -45,14 +46,14 @@ pub trait Env {
 }
 
 pub struct SandboxEnv {
-    scope: Scope,
+    globals: Scope,
     symbols: SymbolTable,
 }
 
 impl Default for SandboxEnv {
     fn default() -> Self {
         let mut this = SandboxEnv {
-            scope: Scope::default(),
+            globals: Scope::default(),
             symbols: SymbolTable::default(),
         };
 
@@ -66,22 +67,27 @@ impl Default for SandboxEnv {
 
 impl Env for SandboxEnv {
     #[inline(always)]
+    fn get_by_id(&self, id: Symbol) -> Result<Value> {
+        match unsafe { &self.globals.get_unchecked(id as usize) } {
+            Some(val) => Ok(val.clone()),
+            None => Err(match self.get_symbol(id) {
+                Ok(s) => error_msg(format!("symbol '{}' not in scope.", s).as_str()),
+                Err(err) => err,
+            }),
+        }
+    }
+
+    #[inline(always)]
     fn get(&self, key: &Value) -> Result<Value> {
         match key {
-            Value::Symbol(id) => match self.scope.get(id) {
-                Some(val) => Ok(val.clone()),
-                None => Err(match self.get_symbol(*id) {
-                    Ok(s) => error_msg(format!("symbol '{}' not in scope.", s).as_str()),
-                    Err(err) => err,
-                }),
-            },
+            Value::Symbol(id) => self.get_by_id(*id),
             _ => Err(error_msg("Only symbols can be used as keys in env.")),
         }
     }
 
     fn set(&mut self, key: &Value, val: &Value) -> Result<()> {
         if let Value::Symbol(s) = key {
-            self.scope.insert(*s, val.clone());
+            self.globals[*s as usize] = Some(val.clone());
             Ok(())
         } else {
             Err(error_msg("Env set: only symbols can be used as keys."))
@@ -90,7 +96,8 @@ impl Env for SandboxEnv {
 
     fn reg_symbol(&mut self, s: String) -> Value {
         let len = self.symbols.len();
-        let id = self.symbols.entry(s).or_insert(len);
+        let id = self.symbols.entry(s).or_insert(len.try_into().unwrap());
+        self.globals.push(None);
         Value::Symbol(*id)
     }
 
@@ -104,8 +111,7 @@ impl Env for SandboxEnv {
 
     fn reg_fn(&mut self, symbol: &str, f: fn(&[Value]) -> Result<Value>) {
         if let Value::Symbol(id) = self.reg_symbol(String::from(symbol)) {
-            self.scope
-                .insert(id, ZapFn::native(String::from(symbol), f));
+            self.globals[id as usize] = Some(ZapFn::native(String::from(symbol), f));
         }
     }
 }

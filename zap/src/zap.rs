@@ -5,7 +5,7 @@ pub use smartstring::alias::String;
 use crate::env::Env;
 use crate::vm::Chunk;
 
-pub type Symbol = usize;
+pub type Symbol = u32;
 
 pub type ZapList = Arc<Vec<Value>>;
 pub type Result<T> = std::result::Result<T, ZapErr>;
