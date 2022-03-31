@@ -71,6 +71,7 @@ impl Compiler {
     }
 
     pub fn chunk(mut self) -> Arc<Chunk> {
+        self.emit(Op::Return);
         self.chunk.ops.shrink_to_fit();
         self.chunk.consts.shrink_to_fit();
         Arc::new(self.chunk)
@@ -257,7 +258,7 @@ impl Compiler {
     pub fn combine_branches(&mut self, chunk: Vec<Op>, then_branch: Vec<Op>) -> Result<()> {
         let else_branch = std::mem::replace(&mut self.chunk.ops, chunk);
 
-        let then_jump = (1 + then_branch.len())
+        let then_jump = (then_branch.len() + 1)
             .try_into()
             .map_err(|_| error_msg("Then branch jump is too big."))?;
         self.emit(Op::CondJmp(then_jump));
@@ -267,7 +268,11 @@ impl Compiler {
             .len()
             .try_into()
             .map_err(|_| error_msg("Else branch jump is too big."))?;
-        self.emit(Op::Jmp(else_jump));
+        if self.is_last_exp() {
+            self.emit(Op::Return);
+        } else {
+            self.emit(Op::Jmp(else_jump));
+        }
         self.chunk.ops.extend(else_branch);
 
         Ok(())
@@ -304,6 +309,10 @@ impl Compiler {
     }
 
     pub fn wrap_fn(&mut self, mut chunk: Chunk) {
+        #[cfg(debug_assertions)]
+        dbg!(&self.chunk);
+
+        self.emit(Op::Return);
         // Swap the chunks
         std::mem::swap(&mut self.chunk, &mut chunk);
         self.forms.push(Form::Value(Value::Func(Arc::new(chunk))));

@@ -23,6 +23,7 @@ pub enum Op {
     Add,    // Add 2 elements at the top of the stack and push the result
     EqConst(u16), // Compare the element at the top of the stack with a constant push true if they're equal and false if they aren't
     Eq, // Compare 2 elements at the top of the stack and push true if they're equal and false if they aren't
+    Return, // Reserved for end of chunk
 }
 
 impl fmt::Debug for Op {
@@ -45,6 +46,7 @@ impl fmt::Debug for Op {
             Op::Add => write!(f, "ADD"),
             Op::EqConst(idx) => write!(f, "EQCONST     const({})", idx),
             Op::Eq => write!(f, "EQ"),
+            Op::Return => write!(f, "RETURN"),
         }
     }
 }
@@ -60,7 +62,8 @@ impl Chunk {
     fn get_callframe(&self, ret: usize) -> CallFrame {
         CallFrame {
             pc: self.ops.as_ptr(),
-            end: unsafe { self.ops.as_ptr().add(self.ops.len() - 1) },
+            #[cfg(debug_assertions)]
+            start: self.ops.as_ptr(),
             consts: self.consts.as_ptr(),
             ret,
         }
@@ -69,7 +72,8 @@ impl Chunk {
 
 struct CallFrame {
     pc: *const Op,
-    end: *const Op,
+    #[cfg(debug_assertions)]
+    start: *const Op,
     consts: *const Value,
     ret: usize,
 }
@@ -91,14 +95,11 @@ impl VmState {
     }
 
     #[inline]
-    fn get_next_op(&mut self) -> Option<Op> {
-        if self.callframe.pc > self.callframe.end {
-            return None;
-        }
+    fn get_next_op(&mut self) -> Op {
         unsafe {
             let pc = self.callframe.pc;
             self.callframe.pc = pc.add(1);
-            Some(*pc)
+            *pc
         }
     }
 
@@ -281,38 +282,40 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
     let mut vm = VmState::new(&chunk);
 
     loop {
-        if let Some(op) = vm.get_next_op() {
-            match op {
-                Op::Push(const_idx) => vm.push_const(const_idx),
-                Op::Call(argc) => vm.call(argc.into())?,
-                Op::Tailcall(argc) => vm.tailcall(argc.into())?,
-                Op::CondJmp(n) => vm.cond_jump(n),
-                Op::Jmp(n) => vm.jump(n),
-                Op::LookUp(id) => vm.lookup(id, env)?,
-                Op::Define => vm.define(env)?,
-                Op::Pop => {
-                    vm.pop_void();
-                }
-                Op::Load(offset) => vm.load(offset),
-                Op::AddConst(const_idx) => vm.add_const(const_idx)?,
-                Op::Add => vm.add()?,
-                Op::EqConst(const_idx) => vm.eq_const(const_idx),
-                Op::Eq => vm.eq(),
-            };
-
-            #[cfg(debug_assertions)]
-            #[allow(clippy::format_in_format_args)]
-            {
-                println!(
-                    "OP: {:<30} {}",
-                    format!("{:?}", &op),
-                    format!("STACK: {:?}", &vm.stack)
-                );
+        let op = vm.get_next_op();
+        match op {
+            Op::Push(const_idx) => vm.push_const(const_idx),
+            Op::Call(argc) => vm.call(argc.into())?,
+            Op::Tailcall(argc) => vm.tailcall(argc.into())?,
+            Op::CondJmp(n) => vm.cond_jump(n),
+            Op::Jmp(n) => vm.jump(n),
+            Op::LookUp(id) => vm.lookup(id, env)?,
+            Op::Define => vm.define(env)?,
+            Op::Pop => {
+                vm.pop_void();
             }
-        } else if !vm.pop_call() {
-            break;
+            Op::Load(offset) => vm.load(offset),
+            Op::AddConst(const_idx) => vm.add_const(const_idx)?,
+            Op::Add => vm.add()?,
+            Op::EqConst(const_idx) => vm.eq_const(const_idx),
+            Op::Eq => vm.eq(),
+            Op::Return => {
+                if !vm.pop_call() {
+                    return Ok(vm.pop())
+                }
+            }
+        };
+
+        #[cfg(debug_assertions)]
+        #[allow(clippy::format_in_format_args)]
+        {
+            println!(
+                "OP: {:0>5} {:<30} {}",
+                unsafe { vm.callframe.pc.offset_from(vm.callframe.start) },
+                format!("{:?}", &op),
+                format!("STACK: {:?}", &vm.stack)
+            );
         }
     }
 
-    Ok(vm.pop())
 }
