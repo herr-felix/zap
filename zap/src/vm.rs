@@ -56,16 +56,17 @@ pub struct Chunk {
 }
 
 impl Chunk {
+    #[inline]
     pub fn get_start(&self) -> *const Op {
         self.ops.as_ptr()
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_end(&self) -> *const Op {
         unsafe { self.ops.as_ptr().add(self.ops.len() - 1) }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn get_const(&self, idx: u16) -> &Value {
         unsafe { &*self.consts.as_ptr().add(idx.into()) }
     }
@@ -98,6 +99,7 @@ impl VmState {
         }
     }
 
+    #[inline]
     pub fn get_next_op(&mut self) -> Option<Op> {
         if self.pc > self.end {
             return None;
@@ -109,6 +111,7 @@ impl VmState {
         }
     }
 
+    #[inline]
     fn pop_call(&mut self) -> bool {
         if let Some(frame) = self.calls.pop() {
             let tos = self.stack.len() - 1;
@@ -124,6 +127,7 @@ impl VmState {
         }
     }
 
+    #[inline]
     fn call(&mut self, argc: usize) -> Result<()> {
         let ret = self.stack.len() - argc;
         match unsafe { &self.stack.get_unchecked(ret) } {
@@ -154,7 +158,7 @@ impl VmState {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn tailcall(&mut self, argc: usize) -> Result<()> {
         let args_base = self.stack.len() - argc;
         match unsafe { &self.stack.get_unchecked(args_base) } {
@@ -185,51 +189,51 @@ impl VmState {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn push(&mut self, val: Value) {
         self.stack.push(val);
     }
 
-    #[inline(always)]
+    #[inline]
     fn pop_void(&mut self) {
         self.stack.truncate(self.stack.len() - 1);
     }
 
-    #[inline(always)]
+    #[inline]
     fn pop(&mut self) -> Value {
         self.stack.pop().unwrap()
     }
 
-    #[inline(always)]
+    #[inline]
     fn get_top(&mut self) -> *const Value {
         unsafe { self.stack.as_ptr().add(self.stack.len() - 1) }
     }
 
-    #[inline(always)]
+    #[inline]
     fn get_top_mut(&mut self) -> *mut Value {
         unsafe { self.stack.as_mut_ptr().add(self.stack.len() - 1) }
     }
 
-    #[inline(always)]
+    #[inline]
     fn jump(&mut self, n: u16) {
         unsafe { self.pc = self.pc.add(n as usize) };
     }
 
-    #[inline(always)]
+    #[inline]
     fn cond_jump(&mut self, n: u16) {
         if !self.pop().is_truthy() {
             self.jump(n);
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn lookup<E: Env>(&mut self, id: Symbol, env: &mut E) -> Result<()> {
         let val = env.get_by_id(id)?;
         self.stack.push(val);
         Ok(())
     }
 
-    #[inline(always)]
+    #[inline]
     fn define<E: Env>(&mut self, env: &mut E) -> Result<()> {
         env.set(
             &self.stack.swap_remove(self.stack.len() - 2),
@@ -237,17 +241,17 @@ impl VmState {
         )
     }
 
-    #[inline(always)]
+    #[inline]
     fn push_const(&mut self, idx: u16) {
         self.push(self.chunk.get_const(idx).clone());
     }
 
-    #[inline(always)]
+    #[inline]
     fn load(&mut self, idx: u8) {
         self.push(unsafe { self.stack.get_unchecked(self.ret + (idx as usize) + 1) }.clone());
     }
 
-    #[inline(always)]
+    #[inline]
     fn add_const(&mut self, idx: u16) -> Result<()> {
         unsafe {
             let a = self.get_top_mut();
@@ -257,7 +261,7 @@ impl VmState {
         Ok(())
     }
 
-    #[inline(always)]
+    #[inline]
     fn add(&mut self) -> Result<()> {
         unsafe {
             let a = self.get_top_mut();
@@ -268,7 +272,7 @@ impl VmState {
         Ok(())
     }
 
-    #[inline(always)]
+    #[inline]
     fn eq_const(&mut self, idx: u16) {
         unsafe {
             let a = self.get_top_mut();
@@ -277,7 +281,7 @@ impl VmState {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn eq(&mut self) {
         unsafe {
             let a = self.get_top_mut();
@@ -288,7 +292,7 @@ impl VmState {
     }
 }
 
-#[inline(always)]
+#[inline]
 pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
     let mut vm = VmState::new(chunk);
 

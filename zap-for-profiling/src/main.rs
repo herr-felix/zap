@@ -11,7 +11,7 @@ fn main() {
 
     zap_core::load(&mut env);
 
-    let src = "(def rec (fn (x) (if (= x 1000000) \"boom\" (rec (+ x 1))))) (rec 0) (rec 0) (rec 0) (rec 0)";
+    let src = "(def rec (fn (x) (if (= x 1000000) \"boom\" (rec (+ x 1))))) (rec 0) (rec 0) (rec 0) (rec 0) (rec 0) (rec 0) (rec 0)";
 
     reader.tokenize(src);
 
