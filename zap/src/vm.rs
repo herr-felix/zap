@@ -49,7 +49,7 @@ impl fmt::Debug for Op {
     }
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug)]
 pub struct Chunk {
     pub ops: Vec<Op>,
     pub consts: Vec<Value>,
@@ -57,56 +57,47 @@ pub struct Chunk {
 
 impl Chunk {
     #[inline]
-    pub fn get_start(&self) -> *const Op {
-        self.ops.as_ptr()
-    }
-
-    #[inline]
-    pub fn get_end(&self) -> *const Op {
-        unsafe { self.ops.as_ptr().add(self.ops.len() - 1) }
-    }
-
-    #[inline]
-    pub fn get_const(&self, idx: u16) -> &Value {
-        unsafe { &*self.consts.as_ptr().add(idx.into()) }
+    fn get_callframe(&self, ret: usize) -> CallFrame {
+        CallFrame {
+            pc: self.ops.as_ptr(),
+            end: unsafe { self.ops.as_ptr().add(self.ops.len() - 1) },
+            consts: self.consts.as_ptr(),
+            ret,
+        }
     }
 }
 
 struct CallFrame {
-    chunk: Arc<Chunk>,
     pc: *const Op,
+    end: *const Op,
+    consts: *const Value,
     ret: usize,
 }
 
+#[repr(align(64))]
 struct VmState {
-    pc: *const Op,
-    end: *const Op,
-    ret: usize,
-    chunk: Arc<Chunk>,
-    calls: Vec<CallFrame>,
+    callframe: CallFrame,
     stack: Vec<Value>,
+    calls: Vec<CallFrame>,
 }
 
 impl VmState {
-    pub fn new(chunk: Arc<Chunk>) -> Self {
+    fn new(chunk: &Arc<Chunk>) -> Self {
         VmState {
-            pc: chunk.get_start(),
-            end: chunk.get_end(),
-            ret: 0,
-            chunk,
-            calls: Vec::with_capacity(8),
-            stack: Vec::with_capacity(16),
+            callframe: chunk.get_callframe(0),
+            calls: Vec::with_capacity(4),
+            stack: Vec::with_capacity(8),
         }
     }
 
     #[inline]
-    pub fn get_next_op(&mut self) -> Option<Op> {
-        if self.pc > self.end {
+    fn get_next_op(&mut self) -> Option<Op> {
+        if self.callframe.pc > self.callframe.end {
             return None;
         }
         unsafe {
-            let pc = self.pc;
-            self.pc = pc.add(1);
+            let pc = self.callframe.pc;
+            self.callframe.pc = pc.add(1);
             Some(*pc)
         }
     }
@@ -115,12 +106,9 @@ impl VmState {
     fn pop_call(&mut self) -> bool {
         if let Some(frame) = self.calls.pop() {
             let tos = self.stack.len() - 1;
-            self.stack.swap(self.ret, tos);
-            self.stack.truncate(self.ret + 1);
-            self.chunk = frame.chunk;
-            self.pc = frame.pc;
-            self.ret = frame.ret;
-            self.end = self.chunk.get_end();
+            self.stack.swap(self.callframe.ret, tos);
+            self.stack.truncate(self.callframe.ret + 1);
+            self.callframe = frame;
             true
         } else {
             false
@@ -132,18 +120,10 @@ impl VmState {
         let ret = self.stack.len() - argc;
         match unsafe { &self.stack.get_unchecked(ret) } {
             Value::Func(chunk) => {
-                let old_chunk = std::mem::replace(&mut self.chunk, chunk.clone());
-
-                self.calls.push(CallFrame {
-                    chunk: old_chunk,
-                    ret: self.ret,
-                    pc: self.pc,
-                });
-
-                self.ret = ret;
-                self.pc = self.chunk.get_start();
-                self.end = self.chunk.get_end();
-
+                self.calls.push(std::mem::replace(
+                    &mut self.callframe,
+                    chunk.get_callframe(ret),
+                ));
                 Ok(())
             }
             Value::FuncNative(f) => {
@@ -163,17 +143,14 @@ impl VmState {
         let args_base = self.stack.len() - argc;
         match unsafe { &self.stack.get_unchecked(args_base) } {
             Value::Func(chunk) => {
-                self.chunk = chunk.clone();
+                self.callframe = chunk.get_callframe(self.callframe.ret);
 
                 // Move the args
                 unsafe {
-                    let start = self.stack.as_mut_ptr().add(self.ret);
+                    let start = self.stack.as_mut_ptr().add(self.callframe.ret);
                     ptr::swap_nonoverlapping(start, start.add(args_base), argc);
                 }
-                self.stack.truncate(self.ret + argc);
-
-                self.pc = self.chunk.get_start();
-                self.end = self.chunk.get_end();
+                self.stack.truncate(self.callframe.ret + argc);
 
                 Ok(())
             }
@@ -181,7 +158,7 @@ impl VmState {
                 let args = unsafe { &self.stack.get_unchecked((args_base + 1)..self.stack.len()) };
 
                 let mut output = (f.func)(args)?;
-                self.stack.truncate(self.ret + 1);
+                self.stack.truncate(self.callframe.ret + 1);
                 std::mem::swap(self.stack.last_mut().unwrap(), &mut output);
                 Ok(())
             }
@@ -205,18 +182,18 @@ impl VmState {
     }
 
     #[inline]
-    fn get_top(&mut self) -> *const Value {
-        unsafe { self.stack.as_ptr().add(self.stack.len() - 1) }
-    }
-
-    #[inline]
     fn get_top_mut(&mut self) -> *mut Value {
         unsafe { self.stack.as_mut_ptr().add(self.stack.len() - 1) }
     }
 
     #[inline]
+    fn get_const(&mut self, idx: u16) -> &Value {
+        unsafe { &*self.callframe.consts.add(idx.into()) }
+    }
+
+    #[inline]
     fn jump(&mut self, n: u16) {
-        unsafe { self.pc = self.pc.add(n as usize) };
+        unsafe { self.callframe.pc = self.callframe.pc.add(n as usize) };
     }
 
     #[inline]
@@ -243,19 +220,26 @@ impl VmState {
 
     #[inline]
     fn push_const(&mut self, idx: u16) {
-        self.push(self.chunk.get_const(idx).clone());
+        let val = self.get_const(idx).clone();
+        self.push(val);
     }
 
     #[inline]
     fn load(&mut self, idx: u8) {
-        self.push(unsafe { self.stack.get_unchecked(self.ret + (idx as usize) + 1) }.clone());
+        self.push(
+            unsafe {
+                self.stack
+                    .get_unchecked(self.callframe.ret + (idx as usize) + 1)
+            }
+            .clone(),
+        );
     }
 
     #[inline]
     fn add_const(&mut self, idx: u16) -> Result<()> {
         unsafe {
             let a = self.get_top_mut();
-            let b = self.chunk.get_const(idx);
+            let b = self.get_const(idx);
             *a = (&*a + &*b)?
         }
         Ok(())
@@ -276,7 +260,7 @@ impl VmState {
     fn eq_const(&mut self, idx: u16) {
         unsafe {
             let a = self.get_top_mut();
-            let b = self.chunk.get_const(idx);
+            let b = self.get_const(idx);
             *a = Value::Bool(*a == *b);
         }
     }
@@ -292,9 +276,9 @@ impl VmState {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
-    let mut vm = VmState::new(chunk);
+    let mut vm = VmState::new(&chunk);
 
     loop {
         if let Some(op) = vm.get_next_op() {

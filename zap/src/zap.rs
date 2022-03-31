@@ -10,8 +10,7 @@ pub type Symbol = u32;
 pub type ZapList = Arc<Vec<Value>>;
 pub type Result<T> = std::result::Result<T, ZapErr>;
 
-#[repr(align(32))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub enum Value {
     Nil,
     Bool(bool),
@@ -83,6 +82,23 @@ impl core::ops::Mul for Value {
     }
 }
 
+impl PartialEq for Value {
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Nil, Value::Nil) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::Symbol(a), Value::Symbol(b)) => a == b,
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::List(a), Value::List(b)) => Arc::ptr_eq(a, b),
+            (Value::FuncNative(a), Value::FuncNative(b)) => Arc::ptr_eq(a, b),
+            (Value::Func(a), Value::Func(b)) => Arc::ptr_eq(a, b),
+            (_, _) => false,
+        }
+    }
+}
+
 impl Default for Value {
     fn default() -> Self {
         Value::Nil
@@ -100,7 +116,6 @@ pub fn error_msg(msg: &str) -> ZapErr {
 
 // ZapFn
 
-#[derive(Clone)]
 pub struct ZapFnNative {
     pub name: String,
     pub func: fn(&[Value]) -> Result<Value>,
@@ -109,11 +124,5 @@ pub struct ZapFnNative {
 impl ZapFnNative {
     pub fn new(name: String, func: fn(&[Value]) -> Result<Value>) -> Arc<ZapFnNative> {
         Arc::new(ZapFnNative { name, func })
-    }
-}
-
-impl PartialEq for ZapFnNative {
-    fn eq(&self, _other: &Self) -> bool {
-        false
     }
 }
