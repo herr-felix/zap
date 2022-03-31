@@ -3,7 +3,7 @@
 use zap::compiler::compile;
 use zap::env::SandboxEnv;
 use zap::reader::Reader;
-use zap::vm::VM;
+use zap::vm;
 
 fn main() {
     let mut reader = Reader::new();
@@ -11,15 +11,13 @@ fn main() {
 
     zap_core::load(&mut env);
 
-    let mut vm = VM::init();
-
     let src = "(def rec (fn (x) (if (= x 1000000) \"boom\" (rec (+ x 1))))) (rec 0) (rec 0) (rec 0) (rec 0)";
 
     reader.tokenize(src);
 
     while let Ok(Some(form)) = reader.read_ast(&mut env) {
         let chunk = compile(form).unwrap();
-        if let Ok(result) = vm.run(chunk, &mut env) {
+        if let Ok(result) = vm::run(chunk, &mut env) {
             println!("{}", result.pr_str(&mut env));
         }
     }

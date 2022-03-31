@@ -3,11 +3,12 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::env::Env;
-use crate::zap::{error_msg, Result, Symbol, Value, ZapFn};
+use crate::zap::{error_msg, Result, Symbol, Value};
 
 // Here lives the VM.
 
-#[derive(Clone, Copy)]
+#[repr(align(8))]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Op {
     Push(u16),      // Push a constant on the top of the stack
     Call(u8),       // Call the function at stack[len-argc]
@@ -27,28 +28,28 @@ pub enum Op {
 impl fmt::Debug for Op {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Op::Push(const_idx) => write!(f, "PUSH      const({})", const_idx),
+            Op::Push(const_idx) => write!(f, "PUSH        const({})", const_idx),
             Op::Call(argc) => {
-                write!(f, "CALL      argc({})", argc)
+                write!(f, "CALL        argc({})", argc)
             }
             Op::Tailcall(argc) => {
-                write!(f, "TAILCALL  argc({})", argc)
+                write!(f, "TAILCALL    argc({})", argc)
             }
-            Op::CondJmp(n) => write!(f, "CONDJMP   {}", n),
-            Op::Jmp(n) => write!(f, "JMP       {}", n),
-            Op::LookUp(id) => write!(f, "LOOKUP    #{}", id),
+            Op::CondJmp(n) => write!(f, "CONDJMP     {}", n),
+            Op::Jmp(n) => write!(f, "JMP         {}", n),
+            Op::LookUp(id) => write!(f, "LOOKUP      #{}", id),
             Op::Define => write!(f, "DEFINE"),
             Op::Pop => write!(f, "POP"),
-            Op::Load(idx) => write!(f, "lOAD      {}", idx),
-            Op::AddConst(idx) => write!(f, "ADDCONST  const({})", idx),
+            Op::Load(idx) => write!(f, "lOAD        {}", idx),
+            Op::AddConst(idx) => write!(f, "ADDCONST    const({})", idx),
             Op::Add => write!(f, "ADD"),
-            Op::EqConst(idx) => write!(f, "EQCONST   const({})", idx),
+            Op::EqConst(idx) => write!(f, "EQCONST     const({})", idx),
             Op::Eq => write!(f, "EQ"),
         }
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, PartialEq)]
 pub struct Chunk {
     pub ops: Vec<Op>,
     pub consts: Vec<Value>,
@@ -108,32 +109,6 @@ impl VmState {
         }
     }
 
-    fn tailcall(&mut self, new_chunk: Arc<Chunk>, argc: usize) {
-        self.chunk = new_chunk;
-        self.pc = self.chunk.get_start();
-        let args_base = self.stack.len() - argc;
-        // Move the args
-        unsafe {
-            let start = self.stack.as_mut_ptr().add(self.ret);
-            ptr::swap_nonoverlapping(start, start.add(args_base), argc);
-        }
-        self.stack.truncate(self.ret + argc);
-    }
-
-    fn push_call(&mut self, new_chunk: Arc<Chunk>, argc: usize) {
-        // Swap the chunks!
-        let old_chunk = std::mem::replace(&mut self.chunk, new_chunk);
-
-        self.calls.push(CallFrame {
-            chunk: old_chunk,
-            ret: self.ret,
-            pc: self.pc,
-        });
-
-        self.ret = self.stack.len() - argc;
-        self.pc = self.chunk.get_start();
-    }
-
     fn pop_call(&mut self) -> bool {
         if let Some(frame) = self.calls.pop() {
             let tos = self.stack.len() - 1;
@@ -149,33 +124,64 @@ impl VmState {
         }
     }
 
-    fn call(&mut self, argc: usize, is_tailcall: bool) -> Result<()> {
-        if let Value::Func(f) = unsafe { &self.stack.get_unchecked(self.stack.len() - argc) } {
-            match f {
-                ZapFn::Native(f) => {
-                    let args = unsafe {
-                        &self
-                            .stack
-                            .get_unchecked((self.stack.len() - argc + 1)..self.stack.len())
-                    };
+    fn call(&mut self, argc: usize) -> Result<()> {
+        let ret = self.stack.len() - argc;
+        match unsafe { &self.stack.get_unchecked(ret) } {
+            Value::Func(chunk) => {
+                let old_chunk = std::mem::replace(&mut self.chunk, chunk.clone());
 
-                    let mut ret = (f.func)(args)?;
-                    self.stack.truncate(self.stack.len() - argc + 1);
-                    std::mem::swap(self.stack.last_mut().unwrap(), &mut ret);
-                }
-                ZapFn::Chunk(chunk) => {
-                    let new_chunk = chunk.clone();
-                    if is_tailcall {
-                        self.tailcall(new_chunk, argc);
-                    } else {
-                        self.push_call(new_chunk, argc);
-                    }
-                    self.end = self.chunk.get_end();
-                }
+                self.calls.push(CallFrame {
+                    chunk: old_chunk,
+                    ret: self.ret,
+                    pc: self.pc,
+                });
+
+                self.ret = ret;
+                self.pc = self.chunk.get_start();
+                self.end = self.chunk.get_end();
+
+                Ok(())
             }
-            Ok(())
-        } else {
-            Err(error_msg("Cannot call a non-function"))
+            Value::FuncNative(f) => {
+                let args = unsafe { &self.stack.get_unchecked((ret + 1)..self.stack.len()) };
+
+                let mut output = (f.func)(args)?;
+                self.stack.truncate(ret + 1);
+                std::mem::swap(self.stack.last_mut().unwrap(), &mut output);
+                Ok(())
+            }
+            _ => Err(error_msg("Cannot call a non-function")),
+        }
+    }
+
+    #[inline(always)]
+    fn tailcall(&mut self, argc: usize) -> Result<()> {
+        let args_base = self.stack.len() - argc;
+        match unsafe { &self.stack.get_unchecked(args_base) } {
+            Value::Func(chunk) => {
+                self.chunk = chunk.clone();
+
+                // Move the args
+                unsafe {
+                    let start = self.stack.as_mut_ptr().add(self.ret);
+                    ptr::swap_nonoverlapping(start, start.add(args_base), argc);
+                }
+                self.stack.truncate(self.ret + argc);
+
+                self.pc = self.chunk.get_start();
+                self.end = self.chunk.get_end();
+
+                Ok(())
+            }
+            Value::FuncNative(f) => {
+                let args = unsafe { &self.stack.get_unchecked((args_base + 1)..self.stack.len()) };
+
+                let mut output = (f.func)(args)?;
+                self.stack.truncate(self.ret + 1);
+                std::mem::swap(self.stack.last_mut().unwrap(), &mut output);
+                Ok(())
+            }
+            _ => Err(error_msg("Cannot call a non-function")),
         }
     }
 
@@ -290,8 +296,8 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
         if let Some(op) = vm.get_next_op() {
             match op {
                 Op::Push(const_idx) => vm.push_const(const_idx),
-                Op::Call(argc) => vm.call(argc.into(), false)?,
-                Op::Tailcall(argc) => vm.call(argc.into(), true)?,
+                Op::Call(argc) => vm.call(argc.into())?,
+                Op::Tailcall(argc) => vm.tailcall(argc.into())?,
                 Op::CondJmp(n) => vm.cond_jump(n),
                 Op::Jmp(n) => vm.jump(n),
                 Op::LookUp(id) => vm.lookup(id, env)?,
@@ -315,10 +321,8 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
                     format!("STACK: {:?}", &vm.stack)
                 );
             }
-        } else {
-            if !vm.pop_call() {
-                break;
-            }
+        } else if !vm.pop_call() {
+            break;
         }
     }
 

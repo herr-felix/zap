@@ -1,4 +1,4 @@
-use crate::zap::{error_msg, Result, String, Symbol, Value, ZapFn};
+use crate::zap::{error_msg, Result, String, Symbol, Value, ZapFnNative};
 use fxhash::FxHashMap;
 
 pub type Scope = Vec<Option<Value>>;
@@ -96,7 +96,10 @@ impl Env for SandboxEnv {
 
     fn reg_symbol(&mut self, s: String) -> Value {
         let len = self.symbols.len();
-        let id = self.symbols.entry(s).or_insert(len.try_into().unwrap());
+        let id = self
+            .symbols
+            .entry(s)
+            .or_insert_with(|| len.try_into().unwrap());
         self.globals.push(None);
         Value::Symbol(*id)
     }
@@ -111,7 +114,8 @@ impl Env for SandboxEnv {
 
     fn reg_fn(&mut self, symbol: &str, f: fn(&[Value]) -> Result<Value>) {
         if let Value::Symbol(id) = self.reg_symbol(String::from(symbol)) {
-            self.globals[id as usize] = Some(ZapFn::native(String::from(symbol), f));
+            self.globals[id as usize] =
+                Some(Value::FuncNative(ZapFnNative::new(String::from(symbol), f)));
         }
     }
 }

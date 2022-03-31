@@ -1,6 +1,6 @@
 use crate::env::symbols;
 use crate::vm::{Chunk, Op};
-use crate::zap::{error_msg, Result, Symbol, Value, ZapFn, ZapList};
+use crate::zap::{error_msg, Result, Symbol, Value, ZapList};
 use fxhash::FxHashMap;
 use std::sync::Arc;
 
@@ -220,13 +220,12 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn eval_symbol(&mut self, s: Symbol) -> Result<()> {
+    pub fn eval_symbol(&mut self, s: Symbol) {
         if let Some(offset) = self.get_local(s) {
             self.emit(Op::Load(offset));
         } else {
             self.emit(Op::LookUp(s));
         }
-        Ok(())
     }
 
     pub fn eval_define(&mut self) {
@@ -307,8 +306,7 @@ impl Compiler {
     pub fn wrap_fn(&mut self, mut chunk: Chunk) {
         // Swap the chunks
         std::mem::swap(&mut self.chunk, &mut chunk);
-        self.forms
-            .push(Form::Value(ZapFn::from_chunk(Arc::new(chunk))));
+        self.forms.push(Form::Value(Value::Func(Arc::new(chunk))));
     }
 }
 
@@ -325,7 +323,7 @@ pub fn compile(ast: Value) -> Result<Arc<Chunk>> {
                         compiler.eval_list(list)?;
                     }
                 }
-                Value::Symbol(s) => compiler.eval_symbol(s)?,
+                Value::Symbol(s) => compiler.eval_symbol(s),
                 atom => compiler.eval_const(&atom)?,
             },
             Form::List(list, idx) => {

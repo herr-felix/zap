@@ -10,6 +10,7 @@ pub type Symbol = u32;
 pub type ZapList = Arc<Vec<Value>>;
 pub type Result<T> = std::result::Result<T, ZapErr>;
 
+#[repr(align(32))]
 #[derive(Clone, PartialEq)]
 pub enum Value {
     Nil,
@@ -18,7 +19,8 @@ pub enum Value {
     Symbol(Symbol),
     Str(String),
     List(ZapList),
-    Func(ZapFn),
+    FuncNative(Arc<ZapFnNative>),
+    Func(Arc<Chunk>),
 }
 
 impl Value {
@@ -98,46 +100,20 @@ pub fn error_msg(msg: &str) -> ZapErr {
 
 // ZapFn
 
+#[derive(Clone)]
 pub struct ZapFnNative {
     pub name: String,
     pub func: fn(&[Value]) -> Result<Value>,
 }
 
-#[derive(Clone)]
-pub enum ZapFn {
-    Native(Arc<ZapFnNative>),
-    Chunk(Arc<Chunk>),
-}
-
-impl ZapFn {
-    pub fn native(name: String, func: fn(&[Value]) -> Result<Value>) -> Value {
-        Value::Func(ZapFn::Native(Arc::new(ZapFnNative { name, func })))
-    }
-
-    pub fn from_chunk(chunk: Arc<Chunk>) -> Value {
-        Value::Func(ZapFn::Chunk(chunk))
+impl ZapFnNative {
+    pub fn new(name: String, func: fn(&[Value]) -> Result<Value>) -> Arc<ZapFnNative> {
+        Arc::new(ZapFnNative { name, func })
     }
 }
 
-impl PartialEq for ZapFn {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (ZapFn::Native(a), ZapFn::Native(b)) => Arc::ptr_eq(a, b),
-            (ZapFn::Chunk(a), ZapFn::Chunk(b)) => Arc::ptr_eq(a, b),
-            (_, _) => false,
-        }
-    }
-}
-
-impl std::fmt::Debug for ZapFn {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ZapFn::Native(_) => {
-                write!(f, "Native func")
-            }
-            ZapFn::Chunk(_) => {
-                write!(f, "<Chunk>")
-            }
-        }
+impl PartialEq for ZapFnNative {
+    fn eq(&self, _other: &Self) -> bool {
+        false
     }
 }
