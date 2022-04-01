@@ -58,7 +58,7 @@ impl fmt::Debug for Op {
 pub struct Chunk {
     pub ops: Vec<Op>,
     pub consts: Vec<Value>,
-    pub scope_size: LocalIndex,
+    pub scope_size: usize,
 }
 
 impl Chunk {
@@ -129,6 +129,11 @@ impl VmState {
                     &mut self.callframe,
                     chunk.get_callframe(ret),
                 ));
+
+                let scope_size = chunk.scope_size;
+                self.stack
+                    .resize_with(self.callframe.ret + scope_size + 1, Default::default);
+
                 Ok(())
             }
             Value::FuncNative(f) => {
@@ -149,13 +154,16 @@ impl VmState {
         match unsafe { &self.stack.get_unchecked(args_base) } {
             Value::Func(chunk) => {
                 self.callframe = chunk.get_callframe(self.callframe.ret);
+                let scope_size = chunk.scope_size;
 
                 // Move the args
                 unsafe {
                     let start = self.stack.as_mut_ptr().add(self.callframe.ret);
                     ptr::swap_nonoverlapping(start, start.add(args_base), argc);
                 }
-                self.stack.truncate(self.callframe.ret + argc);
+
+                self.stack
+                    .resize_with(self.callframe.ret + scope_size + 1, Default::default);
 
                 Ok(())
             }
@@ -247,7 +255,7 @@ impl VmState {
             let local = self
                 .stack
                 .get_unchecked_mut(self.callframe.ret + (idx as usize) + 1);
-            std::mem::replace(local, val);
+            std::mem::drop(std::mem::replace(local, val));
         }
     }
 
@@ -298,7 +306,7 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
 
     // Make place for the locals
     vm.stack
-        .resize_with((chunk.scope_size as usize) + 2, Default::default);
+        .resize_with((chunk.scope_size as usize) + 1, Default::default);
 
     loop {
         let op = vm.get_next_op();

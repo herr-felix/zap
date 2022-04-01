@@ -50,9 +50,8 @@ impl Compiler {
     fn is_last_exp(&self) -> bool {
         for form in self.forms.iter().rev() {
             match form {
+                Form::IfThen(_, _) | Form::IfElse(_, _) | Form::Let(_) => continue,
                 Form::Return(_) => return true,
-                Form::IfThen(_, _) | Form::IfElse(_, _) => continue,
-                Form::Let(_) => continue,
                 _ => return false,
             }
         }
@@ -62,13 +61,13 @@ impl Compiler {
     fn register_local(&mut self, symbol: Symbol) -> Result<LocalIndex> {
         // Add a symbol in the scope
         let (max_len, mut locals) = self.scopes.pop().unwrap();
+        locals.push(symbol);
         let len = locals
             .len()
             .try_into()
             .map_err(|_| error_msg("Too many locals in scope!"))?;
-        locals.push(symbol);
         self.scopes.push((max(max_len, len), locals));
-        Ok(len)
+        Ok(len - 1)
     }
 
     pub fn unregister_locals(&mut self, count: usize) {
@@ -98,7 +97,7 @@ impl Compiler {
     pub fn chunk(mut self) -> Arc<Chunk> {
         self.emit(Op::Return);
         let (count, _) = self.scopes.pop().unwrap();
-        self.chunk.scope_size = count;
+        self.chunk.scope_size = count.into();
         self.chunk.ops.shrink_to_fit();
         self.chunk.consts.shrink_to_fit();
         Arc::new(self.chunk)
@@ -148,6 +147,10 @@ impl Compiler {
                 if list.len() != 3 {
                     return Err(error_msg("A fn form must contains 2 parameters"));
                 }
+
+                // Get into another scope
+                self.scopes.push((0, Vec::new()));
+
                 match &list[1] {
                     Value::List(args) => {
                         // We save the current chunk
@@ -371,6 +374,10 @@ impl Compiler {
         dbg!(&self.chunk);
 
         self.emit(Op::Return);
+
+        let (size, _) = self.scopes.pop().unwrap();
+        self.chunk.scope_size = size.into();
+
         // Swap the chunks
         std::mem::swap(&mut self.chunk, &mut chunk);
         self.forms.push(Form::Value(Value::Func(Arc::new(chunk))));
