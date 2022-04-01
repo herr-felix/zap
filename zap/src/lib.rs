@@ -120,4 +120,10 @@ pub mod tests {
         test_exp("(= nil false)", "false");
         test_exp("(= false false)", "true");
     }
+
+    #[test]
+    fn eval_let() {
+        test_exp("(let (x 12) x)", "12");
+        test_exp("(let (x 12 y (+ x 12)) (+ y 3))", "27");
+    }
 }

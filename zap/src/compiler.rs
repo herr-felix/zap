@@ -1,7 +1,7 @@
 use crate::env::symbols;
-use crate::vm::{Chunk, Op};
+use crate::vm::{Chunk, LocalIndex, Op};
 use crate::zap::{error_msg, Result, Symbol, Value, ZapList};
-use fxhash::FxHashMap;
+use std::cmp::max;
 use std::sync::Arc;
 
 // The compiler takes the expression returned by the reader and return an array of bytecodes
@@ -22,13 +22,15 @@ enum Form {
     Add,
     Equal,
     EqualConst(u16),
+    Let(usize),
+    Binding(Symbol),
 }
 
 struct Compiler {
     chunk: Chunk,
     forms: Vec<Form>,
+    scopes: Vec<(LocalIndex, Vec<Symbol>)>,
     argc: u8,
-    locals: Vec<FxHashMap<Symbol, u8>>,
 }
 
 impl Compiler {
@@ -36,8 +38,8 @@ impl Compiler {
         Compiler {
             chunk: Chunk::default(),
             forms: vec![Form::Value(ast)],
+            scopes: vec![(0, Vec::new())],
             argc: 0,
-            locals: vec![FxHashMap::<Symbol, u8>::default()],
         }
     }
 
@@ -50,28 +52,53 @@ impl Compiler {
             match form {
                 Form::Return(_) => return true,
                 Form::IfThen(_, _) | Form::IfElse(_, _) => continue,
+                Form::Let(_) => continue,
                 _ => return false,
             }
         }
         true
     }
 
-    fn register_local(&mut self, key: &Value) -> Result<()> {
-        if let Value::Symbol(symbol) = key {
-            let locals = self.locals.last_mut().unwrap();
-            locals.insert(*symbol, locals.len().try_into().expect("Too many locals"));
-            Ok(())
-        } else {
-            Err(error_msg("Only symbols can be used as args in fn."))
-        }
+    fn register_local(&mut self, symbol: Symbol) -> Result<LocalIndex> {
+        // Add a symbol in the scope
+        let (max_len, mut locals) = self.scopes.pop().unwrap();
+        let len = locals
+            .len()
+            .try_into()
+            .map_err(|_| error_msg("Too many locals in scope!"))?;
+        locals.push(symbol);
+        self.scopes.push((max(max_len, len), locals));
+        Ok(len)
     }
 
-    fn get_local(&mut self, s: Symbol) -> Option<u8> {
-        self.locals.last().unwrap().get(&s).copied()
+    pub fn unregister_locals(&mut self, count: usize) {
+        // Pop symbols from the scope
+        let (_, scope) = self.scopes.last_mut().unwrap();
+        let new_len = scope.len() - count;
+        scope.truncate(new_len);
+    }
+
+    pub fn register_binding(&mut self, symbol: Symbol) -> Result<()> {
+        let idx = self.register_local(symbol)?;
+        self.emit(Op::Store(idx));
+        Ok(())
+    }
+
+    fn get_local(&mut self, s: Symbol) -> Option<usize> {
+        // Look if this symbol is in the current scope
+        let (_, scope) = self.scopes.last_mut().unwrap();
+        for (offset, local) in scope.iter().enumerate().rev() {
+            if *local == s {
+                return Some(offset);
+            }
+        }
+        None
     }
 
     pub fn chunk(mut self) -> Arc<Chunk> {
         self.emit(Op::Return);
+        let (count, _) = self.scopes.pop().unwrap();
+        self.chunk.scope_size = count;
         self.chunk.ops.shrink_to_fit();
         self.chunk.consts.shrink_to_fit();
         Arc::new(self.chunk)
@@ -129,7 +156,11 @@ impl Compiler {
 
                         // Set all the params in the locals.
                         for arg in args.iter() {
-                            self.register_local(arg)?;
+                            if let Value::Symbol(symbol) = arg {
+                                self.register_local(*symbol)?;
+                            } else {
+                                return Err(error_msg("Only symbols can be used as args in fn."));
+                            }
                         }
                         self.forms.push(Form::Value(list[2].clone()));
                     }
@@ -153,6 +184,33 @@ impl Compiler {
                 let cond = list[1].clone();
                 self.forms.push(Form::IfCond(list));
                 self.forms.push(Form::Value(cond));
+            }
+            Value::Symbol(symbols::LET) => {
+                if list.len() != 3 {
+                    return Err(error_msg("A let form must have 2 parameters"));
+                }
+
+                if let Value::List(bindings) = &list[1] {
+                    // Check for even number of bindings
+                    if bindings.len() % 2 == 1 {
+                        return Err(error_msg("Bindings must have an even number of bindings"));
+                    }
+                    self.forms.push(Form::Let(bindings.len() / 2));
+                    self.forms.push(Form::Value(list[2].clone()));
+
+                    for pair in bindings.rchunks(2) {
+                        if let Value::Symbol(s) = pair[0] {
+                            self.forms.push(Form::Binding(s));
+                            self.forms.push(Form::Value(pair[1].clone()));
+                        } else {
+                            return Err(error_msg(
+                                "A binding must consist of a symbol and an expression",
+                            ));
+                        }
+                    }
+                } else {
+                    return Err(error_msg("A let form must have a list of bindings"));
+                }
             }
             Value::Symbol(symbols::EQUAL) => {
                 if list.len() != 3 {
@@ -223,7 +281,7 @@ impl Compiler {
 
     pub fn eval_symbol(&mut self, s: Symbol) {
         if let Some(offset) = self.get_local(s) {
-            self.emit(Op::Load(offset));
+            self.emit(Op::Load(offset.try_into().unwrap()));
         } else {
             self.emit(Op::LookUp(s));
         }
@@ -376,6 +434,12 @@ pub fn compile(ast: Value) -> Result<Arc<Chunk>> {
                 compiler.eval_define();
             }
             Form::Return(chunk) => compiler.wrap_fn(chunk),
+            Form::Let(locals_count) => {
+                compiler.unregister_locals(locals_count);
+            }
+            Form::Binding(symbol) => {
+                compiler.register_binding(symbol)?;
+            }
         }
     }
 

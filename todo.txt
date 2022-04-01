@@ -1,0 +1,3 @@
+- Reserve space for locals in function (after the args)
+- Make sure the scoping is pushed and poped in the compiler
+- Make sure wrap_fn save the scope_size in the chunk

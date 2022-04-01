@@ -6,19 +6,21 @@ use crate::env::Env;
 use crate::zap::{error_msg, Result, Symbol, Value};
 
 // Here lives the VM.
+//
+pub type LocalIndex = u8;
 
-#[repr(align(8))]
 #[derive(Clone, Copy, PartialEq)]
 pub enum Op {
-    Push(u16),      // Push a constant on the top of the stack
-    Call(u8),       // Call the function at stack[len-argc]
-    Tailcall(u8),   // Call the function at stack[len-argc], but truncate the stack to ret
-    CondJmp(u16),   // Jump forward n ops if the top of the stack is falsy
-    Jmp(u16),       // Jump forward n ops
-    LookUp(Symbol), // LookUp the value of a constant and push result
+    Push(u16),         // Push a constant on the top of the stack
+    Call(u8),          // Call the function at stack[len-argc]
+    Tailcall(u8),      // Call the function at stack[len-argc], but truncate the stack to ret
+    CondJmp(u16),      // Jump forward n ops if the top of the stack is falsy
+    Jmp(u16),          // Jump forward n ops
+    LookUp(Symbol),    // LookUp the value of a constant and push result
     Define, // Associate the value at the top with the symbol right under it and set the value back at the top
     Pop,    // Pop the top of the stack
-    Load(u8), // Push a load on the stack
+    Load(LocalIndex), // Push a load on the stack
+    Store(LocalIndex), // Copy a local on the top of the stack
     AddConst(u16), // Add the element at the top of the stack and a constant and push the result
     Add,    // Add 2 elements at the top of the stack and push the result
     EqConst(u16), // Compare the element at the top of the stack with a constant push true if they're equal and false if they aren't
@@ -41,7 +43,8 @@ impl fmt::Debug for Op {
             Op::LookUp(id) => write!(f, "LOOKUP      #{}", id),
             Op::Define => write!(f, "DEFINE"),
             Op::Pop => write!(f, "POP"),
-            Op::Load(idx) => write!(f, "lOAD        {}", idx),
+            Op::Load(idx) => write!(f, "LOAD        {}", idx),
+            Op::Store(idx) => write!(f, "STORE       {}", idx),
             Op::AddConst(idx) => write!(f, "ADDCONST    const({})", idx),
             Op::Add => write!(f, "ADD"),
             Op::EqConst(idx) => write!(f, "EQCONST     const({})", idx),
@@ -55,6 +58,7 @@ impl fmt::Debug for Op {
 pub struct Chunk {
     pub ops: Vec<Op>,
     pub consts: Vec<Value>,
+    pub scope_size: LocalIndex,
 }
 
 impl Chunk {
@@ -72,10 +76,10 @@ impl Chunk {
 
 struct CallFrame {
     pc: *const Op,
-    #[cfg(debug_assertions)]
-    start: *const Op,
     consts: *const Value,
     ret: usize,
+    #[cfg(debug_assertions)]
+    start: *const Op,
 }
 
 #[repr(align(64))]
@@ -226,7 +230,7 @@ impl VmState {
     }
 
     #[inline]
-    fn load(&mut self, idx: u8) {
+    fn load(&mut self, idx: LocalIndex) {
         self.push(
             unsafe {
                 self.stack
@@ -234,6 +238,17 @@ impl VmState {
             }
             .clone(),
         );
+    }
+
+    #[inline]
+    fn store(&mut self, idx: LocalIndex) {
+        let val = self.pop();
+        unsafe {
+            let local = self
+                .stack
+                .get_unchecked_mut(self.callframe.ret + (idx as usize) + 1);
+            std::mem::replace(local, val);
+        }
     }
 
     #[inline]
@@ -281,6 +296,10 @@ impl VmState {
 pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
     let mut vm = VmState::new(&chunk);
 
+    // Make place for the locals
+    vm.stack
+        .resize_with((chunk.scope_size as usize) + 2, Default::default);
+
     loop {
         let op = vm.get_next_op();
         match op {
@@ -295,13 +314,14 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
                 vm.pop_void();
             }
             Op::Load(offset) => vm.load(offset),
+            Op::Store(offset) => vm.store(offset),
             Op::AddConst(const_idx) => vm.add_const(const_idx)?,
             Op::Add => vm.add()?,
             Op::EqConst(const_idx) => vm.eq_const(const_idx),
             Op::Eq => vm.eq(),
             Op::Return => {
                 if !vm.pop_call() {
-                    return Ok(vm.pop())
+                    return Ok(vm.pop());
                 }
             }
         };
@@ -317,5 +337,4 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
             );
         }
     }
-
 }
