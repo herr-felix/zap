@@ -1,11 +1,18 @@
 use crate::env::symbols;
 use crate::vm::{Chunk, LocalIndex, Op};
-use crate::zap::{error_msg, Result, Symbol, Value, ZapList};
+use crate::zap::{error_msg, Result, Symbol, Value, ZapFn, ZapList};
 use std::cmp::max;
 use std::sync::Arc;
 
 // The compiler takes the expression returned by the reader and return an array of bytecodes
 // which can be executed by the VM.
+
+#[derive(Debug)]
+pub struct Outer {
+    pub level: usize,
+    pub position: usize,
+    pub dest: LocalIndex,
+}
 
 #[derive(Debug)]
 enum Form {
@@ -30,6 +37,7 @@ struct Compiler {
     chunk: Chunk,
     forms: Vec<Form>,
     scopes: Vec<(LocalIndex, Vec<Symbol>)>,
+    outers: Vec<Vec<Outer>>,
     argc: u8,
 }
 
@@ -39,6 +47,7 @@ impl Compiler {
             chunk: Chunk::default(),
             forms: vec![Form::Value(ast)],
             scopes: vec![(0, Vec::new())],
+            outers: vec![Vec::new()],
             argc: 0,
         }
     }
@@ -89,6 +98,18 @@ impl Compiler {
         for (offset, local) in scope.iter().enumerate().rev() {
             if *local == s {
                 return Some(offset);
+            }
+        }
+        None
+    }
+
+    fn get_outer(&mut self, s: Symbol) -> Option<(usize, usize)> {
+        // Look if this symbol is in the current scope
+        for (level, (_, scope)) in self.scopes.iter().enumerate().rev() {
+            for (position, symbol) in scope.iter().enumerate().rev() {
+                if *symbol == s {
+                    return Some((level, position + 1));
+                }
             }
         }
         None
@@ -286,7 +307,18 @@ impl Compiler {
         if let Some(offset) = self.get_local(s) {
             self.emit(Op::Load(offset.try_into().unwrap()));
         } else {
-            self.emit(Op::LookUp(s));
+            if let Some((level, position)) = self.get_outer(s) {
+                let dest = self.register_local(s).unwrap();
+                let outer = Outer {
+                    level,
+                    position,
+                    dest,
+                };
+                self.outers.last_mut().unwrap().push(outer);
+                self.emit(Op::Load(dest));
+            } else {
+                self.emit(Op::LookUp(s));
+            }
         }
     }
 
@@ -369,18 +401,32 @@ impl Compiler {
         self.emit(Op::EqConst(idx));
     }
 
-    pub fn wrap_fn(&mut self, mut chunk: Chunk) {
+    fn pop_scope(&mut self) -> (usize, Vec<Outer>) {
+        let (size, _) = self.scopes.pop().unwrap();
+        let outers = self.outers.pop().unwrap();
+        (size.into(), outers)
+    }
+
+    pub fn wrap_fn(&mut self, mut chunk: Chunk) -> Result<()> {
         #[cfg(debug_assertions)]
         dbg!(&self.chunk);
 
         self.emit(Op::Return);
 
-        let (size, _) = self.scopes.pop().unwrap();
-        self.chunk.scope_size = size.into();
+        let (size, outers) = self.pop_scope();
+        self.chunk.scope_size = size;
 
         // Swap the chunks
         std::mem::swap(&mut self.chunk, &mut chunk);
-        self.forms.push(Form::Value(Value::Func(Arc::new(chunk))));
+
+        if outers.is_empty() {
+            self.push(&ZapFn::new(size, chunk))?;
+        } else {
+            self.push(&ZapFn::new_closure(outers, chunk))?;
+            self.emit(Op::Closure);
+        }
+
+        Ok(())
     }
 }
 
@@ -440,7 +486,7 @@ pub fn compile(ast: Value) -> Result<Arc<Chunk>> {
             Form::Define => {
                 compiler.eval_define();
             }
-            Form::Return(chunk) => compiler.wrap_fn(chunk),
+            Form::Return(chunk) => compiler.wrap_fn(chunk)?,
             Form::Let(locals_count) => {
                 compiler.unregister_locals(locals_count);
             }

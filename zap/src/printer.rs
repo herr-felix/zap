@@ -33,8 +33,9 @@ impl std::fmt::Display for Value {
             Value::Symbol(n) => write!(f, "Symbol#{}", n),
             Value::Str(s) => write!(f, "\"{}\"", escape_str(s)),
             Value::List(l) => write!(f, "{}", debug_seq(l, "(", ")")),
-            Value::Func(_) => write!(f, "Func"),
-            Value::FuncNative(func) => write!(f, "FuncNative<{}>", func.name),
+            Value::Func(func) => write!(f, "<Func [{:?}]>", func.locals),
+            Value::FuncNative(func) => write!(f, "<FuncNative {}>", func.name),
+            Value::Closure(_) => write!(f, "<Closure>"),
         }
     }
 }

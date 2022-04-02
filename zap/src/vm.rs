@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::env::Env;
-use crate::zap::{error_msg, Result, Symbol, Value};
+use crate::zap::{error_msg, Result, Symbol, Value, ZapFn};
 
 // Here lives the VM.
 //
@@ -26,6 +26,7 @@ pub enum Op {
     EqConst(u16), // Compare the element at the top of the stack with a constant push true if they're equal and false if they aren't
     Eq, // Compare 2 elements at the top of the stack and push true if they're equal and false if they aren't
     Return, // Reserved for end of chunk
+    Closure, // Transform the closure at the top of the stack into a func, capturing the outers.
 }
 
 impl fmt::Debug for Op {
@@ -50,6 +51,7 @@ impl fmt::Debug for Op {
             Op::EqConst(idx) => write!(f, "EQCONST     const({})", idx),
             Op::Eq => write!(f, "EQ"),
             Op::Return => write!(f, "RETURN"),
+            Op::Closure => write!(f, "CLOSURE"),
         }
     }
 }
@@ -74,12 +76,19 @@ impl Chunk {
     }
 }
 
-struct CallFrame {
+pub struct CallFrame {
     pc: *const Op,
     consts: *const Value,
     ret: usize,
     #[cfg(debug_assertions)]
     start: *const Op,
+}
+
+impl CallFrame {
+    #[inline]
+    pub fn get_ret(&self) -> usize {
+        self.ret
+    }
 }
 
 #[repr(align(64))]
@@ -124,15 +133,15 @@ impl VmState {
     fn call(&mut self, argc: usize) -> Result<()> {
         let ret = self.stack.len() - argc;
         match unsafe { &self.stack.get_unchecked(ret) } {
-            Value::Func(chunk) => {
+            Value::Func(func) => {
+                let func = func.clone();
                 self.calls.push(std::mem::replace(
                     &mut self.callframe,
-                    chunk.get_callframe(ret),
+                    func.chunk.get_callframe(ret),
                 ));
 
-                let scope_size = chunk.scope_size;
-                self.stack
-                    .resize_with(self.callframe.ret + scope_size + 1, Default::default);
+                let locals = &func.locals[(argc - 1)..];
+                self.stack.extend_from_slice(locals);
 
                 Ok(())
             }
@@ -151,10 +160,10 @@ impl VmState {
     #[inline]
     fn tailcall(&mut self, argc: usize) -> Result<()> {
         let args_base = self.stack.len() - argc;
-        match unsafe { &self.stack.get_unchecked(args_base) } {
-            Value::Func(chunk) => {
-                self.callframe = chunk.get_callframe(self.callframe.ret);
-                let scope_size = chunk.scope_size;
+        let first = std::mem::take(unsafe { self.stack.get_unchecked_mut(args_base) });
+        match first {
+            Value::Func(func) => {
+                self.callframe = func.chunk.get_callframe(self.callframe.ret);
 
                 // Move the args
                 unsafe {
@@ -162,8 +171,10 @@ impl VmState {
                     ptr::swap_nonoverlapping(start, start.add(args_base), argc);
                 }
 
-                self.stack
-                    .resize_with(self.callframe.ret + scope_size + 1, Default::default);
+                self.stack.truncate(self.callframe.ret + argc);
+
+                let locals = &func.locals[(argc - 1)..];
+                self.stack.extend_from_slice(locals);
 
                 Ok(())
             }
@@ -298,6 +309,19 @@ impl VmState {
         }
         self.pop_void();
     }
+
+    #[inline]
+    fn closure(&mut self) -> Result<()> {
+        if let Value::Closure(closure) = std::mem::take(self.stack.last_mut().unwrap()) {
+            dbg!(&closure);
+            let mut func = ZapFn::from_closure(closure, &self.calls, &self.stack);
+            dbg!(&func);
+            std::mem::swap(self.stack.last_mut().unwrap(), &mut func);
+            Ok(())
+        } else {
+            Err(error_msg("A Closure was expected at the top of the stack."))
+        }
+    }
 }
 
 #[inline(always)]
@@ -327,6 +351,7 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
             Op::Add => vm.add()?,
             Op::EqConst(const_idx) => vm.eq_const(const_idx),
             Op::Eq => vm.eq(),
+            Op::Closure => vm.closure()?,
             Op::Return => {
                 if !vm.pop_call() {
                     return Ok(vm.pop());
@@ -338,7 +363,7 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
         #[allow(clippy::format_in_format_args)]
         {
             println!(
-                "OP: {:0>5} {:<30} {}",
+                "{:0>5} {:<30} {}",
                 unsafe { vm.callframe.pc.offset_from(vm.callframe.start) },
                 format!("{:?}", &op),
                 format!("STACK: {:?}", &vm.stack)

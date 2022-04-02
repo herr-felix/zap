@@ -127,4 +127,9 @@ pub mod tests {
         test_exp("(let (x 12 y (+ x 12)) (+ y 3))", "27");
         test_exp("(let (f (fn (x) (+ x x x))) (f 12))", "36");
     }
+
+    #[test]
+    fn eval_closure() {
+        test_exp("(let (n 2 f (fn (x) (+ x n))) (f 3))", "5");
+    }
 }
