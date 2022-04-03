@@ -143,15 +143,15 @@ impl ZapFn {
 
     pub fn new_closure(outers: Vec<Outer>, chunk: Chunk) -> Value {
         Value::Closure(Arc::new(Closure {
-            outers: outers,
+            outers,
             chunk: Arc::new(chunk),
         }))
     }
 
     pub fn from_closure(
         closure: Arc<Closure>,
-        callframes: &Vec<CallFrame>,
-        stack: &Vec<Value>,
+        callframes: &[CallFrame],
+        stack: &[Value],
     ) -> Value {
         let mut locals = vec![Value::default(); closure.chunk.scope_size];
 
@@ -169,7 +169,7 @@ impl ZapFn {
         }
 
         Value::Func(Arc::new(ZapFn {
-            locals: locals,
+            locals,
             chunk: closure.chunk.clone(),
         }))
     }

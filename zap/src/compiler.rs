@@ -108,7 +108,7 @@ impl Compiler {
         for (level, (_, scope)) in self.scopes.iter().enumerate().rev() {
             for (position, symbol) in scope.iter().enumerate().rev() {
                 if *symbol == s {
-                    return Some((level, position + 1));
+                    return Some((level, position));
                 }
             }
         }
@@ -306,19 +306,17 @@ impl Compiler {
     pub fn eval_symbol(&mut self, s: Symbol) {
         if let Some(offset) = self.get_local(s) {
             self.emit(Op::Load(offset.try_into().unwrap()));
+        } else if let Some((level, position)) = self.get_outer(s) {
+            let dest = self.register_local(s).unwrap();
+            let outer = Outer {
+                level,
+                position,
+                dest,
+            };
+            self.outers.last_mut().unwrap().push(outer);
+            self.emit(Op::Load(dest));
         } else {
-            if let Some((level, position)) = self.get_outer(s) {
-                let dest = self.register_local(s).unwrap();
-                let outer = Outer {
-                    level,
-                    position,
-                    dest,
-                };
-                self.outers.last_mut().unwrap().push(outer);
-                self.emit(Op::Load(dest));
-            } else {
-                self.emit(Op::LookUp(s));
-            }
+            self.emit(Op::LookUp(s));
         }
     }
 

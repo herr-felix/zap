@@ -132,9 +132,9 @@ impl VmState {
     #[inline]
     fn call(&mut self, argc: usize) -> Result<()> {
         let ret = self.stack.len() - argc;
-        match unsafe { &self.stack.get_unchecked(ret) } {
+        let head = std::mem::take(unsafe { self.stack.get_unchecked_mut(ret) });
+        match head {
             Value::Func(func) => {
-                let func = func.clone();
                 self.calls.push(std::mem::replace(
                     &mut self.callframe,
                     func.chunk.get_callframe(ret),
@@ -160,18 +160,18 @@ impl VmState {
     #[inline]
     fn tailcall(&mut self, argc: usize) -> Result<()> {
         let args_base = self.stack.len() - argc;
-        let first = std::mem::take(unsafe { self.stack.get_unchecked_mut(args_base) });
-        match first {
+        let head = std::mem::take(unsafe { self.stack.get_unchecked_mut(args_base) });
+        match head {
             Value::Func(func) => {
                 self.callframe = func.chunk.get_callframe(self.callframe.ret);
 
                 // Move the args
                 unsafe {
                     let start = self.stack.as_mut_ptr().add(self.callframe.ret);
-                    ptr::swap_nonoverlapping(start, start.add(args_base), argc);
+                    ptr::swap_nonoverlapping(start, start.add(args_base + 1), argc - 1);
                 }
 
-                self.stack.truncate(self.callframe.ret + argc);
+                self.stack.truncate(self.callframe.ret + argc - 1);
 
                 let locals = &func.locals[(argc - 1)..];
                 self.stack.extend_from_slice(locals);
@@ -253,7 +253,7 @@ impl VmState {
         self.push(
             unsafe {
                 self.stack
-                    .get_unchecked(self.callframe.ret + (idx as usize) + 1)
+                    .get_unchecked(self.callframe.ret + (idx as usize))
             }
             .clone(),
         );
@@ -265,7 +265,7 @@ impl VmState {
         unsafe {
             let local = self
                 .stack
-                .get_unchecked_mut(self.callframe.ret + (idx as usize) + 1);
+                .get_unchecked_mut(self.callframe.ret + (idx as usize));
             std::mem::drop(std::mem::replace(local, val));
         }
     }
@@ -324,13 +324,14 @@ impl VmState {
     }
 }
 
-#[inline(always)]
 pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
     let mut vm = VmState::new(&chunk);
 
+    dbg!(&chunk);
+
     // Make place for the locals
     vm.stack
-        .resize_with((chunk.scope_size as usize) + 1, Default::default);
+        .resize_with(chunk.scope_size as usize, Default::default);
 
     loop {
         let op = vm.get_next_op();
