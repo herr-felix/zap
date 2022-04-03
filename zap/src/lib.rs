@@ -9,7 +9,7 @@ pub mod zap;
 
 pub use crate::zap::*;
 
-#[cfg(debug_assertions)]
+//#[cfg(debug_assertions)]
 pub mod tests {
     use crate::compiler::compile;
     use crate::env::SandboxEnv;

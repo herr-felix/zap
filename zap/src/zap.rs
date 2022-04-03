@@ -148,11 +148,7 @@ impl ZapFn {
         }))
     }
 
-    pub fn from_closure(
-        closure: Arc<Closure>,
-        callframes: &[CallFrame],
-        stack: &[Value],
-    ) -> Value {
+    pub fn from_closure(closure: Arc<Closure>, callframes: &[CallFrame], stack: &[Value]) -> Value {
         let mut locals = vec![Value::default(); closure.chunk.scope_size];
 
         for outer in &closure.outers {

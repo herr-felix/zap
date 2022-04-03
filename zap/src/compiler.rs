@@ -7,6 +7,84 @@ use std::sync::Arc;
 // The compiler takes the expression returned by the reader and return an array of bytecodes
 // which can be executed by the VM.
 
+struct Scoping {
+    scopes: Vec<(LocalIndex, Vec<Symbol>)>,
+    outers: Vec<Vec<Outer>>,
+}
+
+impl Default for Scoping {
+    fn default() -> Self {
+        Scoping {
+            scopes: vec![(0, Vec::new())],
+            outers: vec![Vec::new()],
+        }
+    }
+}
+
+impl Scoping {
+    pub fn push_local(&mut self, symbol: Symbol) -> Result<LocalIndex> {
+        // Add a symbol in the scope
+        let (max_len, mut locals) = self.scopes.pop().unwrap();
+        locals.push(symbol);
+        let len = locals
+            .len()
+            .try_into()
+            .map_err(|_| error_msg("Too many locals in scope!"))?;
+        self.scopes.push((max(max_len, len), locals));
+        Ok(len - 1)
+    }
+
+    pub fn pop_locals(&mut self, count: usize) {
+        // Pop symbols from the scope
+        let (_, scope) = self.scopes.last_mut().unwrap();
+        let new_len = scope.len() - count;
+        scope.truncate(new_len);
+    }
+
+    pub fn get_local(&mut self, s: Symbol) -> Option<usize> {
+        // Look if this symbol is in the current scope
+        let (_, scope) = self.scopes.last_mut().unwrap();
+        for (offset, local) in scope.iter().enumerate().rev() {
+            if *local == s {
+                return Some(offset);
+            }
+        }
+        None
+    }
+
+    pub fn get_outer(&mut self, s: Symbol) -> Option<(usize, usize)> {
+        // Look if this symbol is in the current scope
+        for (level, (_, scope)) in self.scopes.iter().enumerate().rev() {
+            for (position, symbol) in scope.iter().enumerate().rev() {
+                if *symbol == s {
+                    return Some((level, position));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn push_outer(&mut self, level: usize, position: usize, dest: LocalIndex) {
+        let outer = Outer {
+            level,
+            position,
+            dest,
+        };
+        self.outers.last_mut().unwrap().push(outer);
+    }
+
+    pub fn push(&mut self) {
+        self.scopes.push((0, Vec::new()));
+        self.outers.push(Vec::new());
+    }
+
+    pub fn pop(&mut self) -> (usize, Vec<Outer>) {
+        let (size, _) = self.scopes.pop().unwrap();
+        let outers = self.outers.pop().unwrap();
+        (size.into(), outers)
+    }
+}
+
 #[derive(Debug)]
 pub struct Outer {
     pub level: usize,
@@ -36,8 +114,7 @@ enum Form {
 struct Compiler {
     chunk: Chunk,
     forms: Vec<Form>,
-    scopes: Vec<(LocalIndex, Vec<Symbol>)>,
-    outers: Vec<Vec<Outer>>,
+    scopes: Scoping,
     argc: u8,
 }
 
@@ -46,8 +123,7 @@ impl Compiler {
         Compiler {
             chunk: Chunk::default(),
             forms: vec![Form::Value(ast)],
-            scopes: vec![(0, Vec::new())],
-            outers: vec![Vec::new()],
+            scopes: Scoping::default(),
             argc: 0,
         }
     }
@@ -67,58 +143,16 @@ impl Compiler {
         true
     }
 
-    fn register_local(&mut self, symbol: Symbol) -> Result<LocalIndex> {
-        // Add a symbol in the scope
-        let (max_len, mut locals) = self.scopes.pop().unwrap();
-        locals.push(symbol);
-        let len = locals
-            .len()
-            .try_into()
-            .map_err(|_| error_msg("Too many locals in scope!"))?;
-        self.scopes.push((max(max_len, len), locals));
-        Ok(len - 1)
-    }
-
-    pub fn unregister_locals(&mut self, count: usize) {
-        // Pop symbols from the scope
-        let (_, scope) = self.scopes.last_mut().unwrap();
-        let new_len = scope.len() - count;
-        scope.truncate(new_len);
-    }
-
     pub fn register_binding(&mut self, symbol: Symbol) -> Result<()> {
-        let idx = self.register_local(symbol)?;
+        let idx = self.scopes.push_local(symbol)?;
         self.emit(Op::Store(idx));
         Ok(())
     }
 
-    fn get_local(&mut self, s: Symbol) -> Option<usize> {
-        // Look if this symbol is in the current scope
-        let (_, scope) = self.scopes.last_mut().unwrap();
-        for (offset, local) in scope.iter().enumerate().rev() {
-            if *local == s {
-                return Some(offset);
-            }
-        }
-        None
-    }
-
-    fn get_outer(&mut self, s: Symbol) -> Option<(usize, usize)> {
-        // Look if this symbol is in the current scope
-        for (level, (_, scope)) in self.scopes.iter().enumerate().rev() {
-            for (position, symbol) in scope.iter().enumerate().rev() {
-                if *symbol == s {
-                    return Some((level, position));
-                }
-            }
-        }
-        None
-    }
-
     pub fn chunk(mut self) -> Arc<Chunk> {
         self.emit(Op::Return);
-        let (count, _) = self.scopes.pop().unwrap();
-        self.chunk.scope_size = count.into();
+        let (count, _) = self.scopes.pop();
+        self.chunk.scope_size = count;
         self.chunk.ops.shrink_to_fit();
         self.chunk.consts.shrink_to_fit();
         Arc::new(self.chunk)
@@ -170,7 +204,7 @@ impl Compiler {
                 }
 
                 // Get into another scope
-                self.scopes.push((0, Vec::new()));
+                self.scopes.push();
 
                 match &list[1] {
                     Value::List(args) => {
@@ -181,7 +215,7 @@ impl Compiler {
                         // Set all the params in the locals.
                         for arg in args.iter() {
                             if let Value::Symbol(symbol) = arg {
-                                self.register_local(*symbol)?;
+                                self.scopes.push_local(*symbol)?;
                             } else {
                                 return Err(error_msg("Only symbols can be used as args in fn."));
                             }
@@ -303,21 +337,17 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn eval_symbol(&mut self, s: Symbol) {
-        if let Some(offset) = self.get_local(s) {
+    pub fn eval_symbol(&mut self, s: Symbol) -> Result<()> {
+        if let Some(offset) = self.scopes.get_local(s) {
             self.emit(Op::Load(offset.try_into().unwrap()));
-        } else if let Some((level, position)) = self.get_outer(s) {
-            let dest = self.register_local(s).unwrap();
-            let outer = Outer {
-                level,
-                position,
-                dest,
-            };
-            self.outers.last_mut().unwrap().push(outer);
+        } else if let Some((level, position)) = self.scopes.get_outer(s) {
+            let dest = self.scopes.push_local(s)?;
+            self.scopes.push_outer(level, position, dest);
             self.emit(Op::Load(dest));
         } else {
             self.emit(Op::LookUp(s));
         }
+        Ok(())
     }
 
     pub fn eval_define(&mut self) {
@@ -399,19 +429,13 @@ impl Compiler {
         self.emit(Op::EqConst(idx));
     }
 
-    fn pop_scope(&mut self) -> (usize, Vec<Outer>) {
-        let (size, _) = self.scopes.pop().unwrap();
-        let outers = self.outers.pop().unwrap();
-        (size.into(), outers)
-    }
-
     pub fn wrap_fn(&mut self, mut chunk: Chunk) -> Result<()> {
         #[cfg(debug_assertions)]
         dbg!(&self.chunk);
 
         self.emit(Op::Return);
 
-        let (size, outers) = self.pop_scope();
+        let (size, outers) = self.scopes.pop();
         self.chunk.scope_size = size;
 
         // Swap the chunks
@@ -441,7 +465,7 @@ pub fn compile(ast: Value) -> Result<Arc<Chunk>> {
                         compiler.eval_list(list)?;
                     }
                 }
-                Value::Symbol(s) => compiler.eval_symbol(s),
+                Value::Symbol(s) => compiler.eval_symbol(s)?,
                 atom => compiler.eval_const(&atom)?,
             },
             Form::List(list, idx) => {
@@ -486,7 +510,7 @@ pub fn compile(ast: Value) -> Result<Arc<Chunk>> {
             }
             Form::Return(chunk) => compiler.wrap_fn(chunk)?,
             Form::Let(locals_count) => {
-                compiler.unregister_locals(locals_count);
+                compiler.scopes.pop_locals(locals_count);
             }
             Form::Binding(symbol) => {
                 compiler.register_binding(symbol)?;
