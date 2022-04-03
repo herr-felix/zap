@@ -313,9 +313,7 @@ impl VmState {
     #[inline]
     fn closure(&mut self) -> Result<()> {
         if let Value::Closure(closure) = std::mem::take(self.stack.last_mut().unwrap()) {
-            dbg!(&closure);
             let mut func = ZapFn::from_closure(closure, &self.calls, &self.stack);
-            dbg!(&func);
             std::mem::swap(self.stack.last_mut().unwrap(), &mut func);
             Ok(())
         } else {
@@ -326,8 +324,6 @@ impl VmState {
 
 pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
     let mut vm = VmState::new(&chunk);
-
-    dbg!(&chunk);
 
     // Make place for the locals
     vm.stack

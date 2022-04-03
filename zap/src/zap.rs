@@ -162,7 +162,6 @@ impl ZapFn {
                 } else {
                     callframes.get_unchecked(outer.level - 1).get_ret()
                 };
-                println!("Moving {}:{} to local {}", base, outer.position, outer.dest);
                 let val = stack.get_unchecked(base + outer.position).clone();
                 ptr::write(locals.as_mut_ptr().add(outer.dest.into()), val);
             }

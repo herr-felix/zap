@@ -20,7 +20,6 @@ pub mod tests {
     pub fn run_exp(src: &str, mut env: SandboxEnv) -> zap::Result<zap::String> {
         let mut reader = Reader::new();
 
-        dbg!(src);
         reader.tokenize(src);
         reader.flush_token();
 
