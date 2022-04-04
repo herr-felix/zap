@@ -61,6 +61,7 @@ pub struct Chunk {
     pub ops: Vec<Op>,
     pub consts: Vec<Value>,
     pub scope_size: usize,
+    pub arity: u8,
 }
 
 impl Chunk {
@@ -91,7 +92,6 @@ impl CallFrame {
     }
 }
 
-#[repr(align(64))]
 struct VmState {
     callframe: CallFrame,
     stack: Vec<Value>,
@@ -140,7 +140,7 @@ impl VmState {
                     func.chunk.get_callframe(ret),
                 ));
 
-                self.stack.extend_from_slice(&func.locals[argc..]);
+                self.stack.extend_from_slice(&func.locals);
 
                 Ok(())
             }
@@ -173,7 +173,7 @@ impl VmState {
                 }
 
                 self.stack.truncate(self.callframe.ret + argc);
-                self.stack.extend_from_slice(&func.locals[argc..]);
+                self.stack.extend_from_slice(&func.locals);
 
                 Ok(())
             }

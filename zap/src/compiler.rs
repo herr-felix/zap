@@ -209,8 +209,10 @@ impl Compiler {
                 match &list[1] {
                     Value::List(args) => {
                         // We save the current chunk
-                        let chunk = std::mem::take(&mut self.chunk);
-                        self.forms.push(Form::Return(chunk));
+                        let parent_chunk = std::mem::take(&mut self.chunk);
+                        self.forms.push(Form::Return(parent_chunk));
+
+                        self.chunk.arity = args.len().try_into().unwrap();
 
                         // Set all the params in the locals.
                         for arg in args.iter() {

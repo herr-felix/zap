@@ -135,8 +135,9 @@ pub struct ZapFn {
 
 impl ZapFn {
     pub fn new(scope_size: usize, chunk: Chunk) -> Value {
+        let arity: usize = chunk.arity.into();
         Value::Func(Arc::new(ZapFn {
-            locals: vec![Value::Nil; scope_size],
+            locals: vec![Value::Nil; scope_size - arity],
             chunk: Arc::new(chunk),
         }))
     }
@@ -149,7 +150,8 @@ impl ZapFn {
     }
 
     pub fn from_closure(closure: Arc<Closure>, callframes: &[CallFrame], stack: &[Value]) -> Value {
-        let mut locals = vec![Value::default(); closure.chunk.scope_size];
+        let arity: usize = closure.chunk.arity.into();
+        let mut locals = vec![Value::default(); closure.chunk.scope_size - arity];
 
         for outer in &closure.outers {
             unsafe {
@@ -159,7 +161,7 @@ impl ZapFn {
                     callframes.get_unchecked(outer.level - 1).get_ret()
                 };
                 let val = stack.get_unchecked(base + outer.position).clone();
-                ptr::write(locals.as_mut_ptr().add(outer.dest.into()), val);
+                ptr::write(locals.as_mut_ptr().add((outer.dest as usize) - arity), val);
             }
         }
 
