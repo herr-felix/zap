@@ -1,9 +1,11 @@
+use std::ptr;
 use std::sync::Arc;
 
 pub use smartstring::alias::String;
 
+use crate::compiler::Outer;
 use crate::env::Env;
-use crate::vm::Chunk;
+use crate::vm::{CallFrame, Chunk};
 
 pub type Symbol = u32;
 
@@ -19,7 +21,8 @@ pub enum Value {
     Str(String),
     List(ZapList),
     FuncNative(Arc<ZapFnNative>),
-    Func(Arc<Chunk>),
+    Func(Arc<ZapFn>),
+    Closure(Arc<Closure>),
 }
 
 impl Value {
@@ -114,7 +117,58 @@ pub fn error_msg(msg: &str) -> ZapErr {
     ZapErr::Msg(msg.to_string())
 }
 
+//
 // ZapFn
+//
+
+#[derive(Debug)]
+pub struct Closure {
+    outers: Vec<Outer>,
+    chunk: Arc<Chunk>,
+}
+
+#[derive(Debug)]
+pub struct ZapFn {
+    pub locals: Vec<Value>,
+    pub chunk: Arc<Chunk>,
+}
+
+impl ZapFn {
+    pub fn new(scope_size: usize, chunk: Chunk) -> Value {
+        Value::Func(Arc::new(ZapFn {
+            locals: vec![Value::Nil; scope_size],
+            chunk: Arc::new(chunk),
+        }))
+    }
+
+    pub fn new_closure(outers: Vec<Outer>, chunk: Chunk) -> Value {
+        Value::Closure(Arc::new(Closure {
+            outers,
+            chunk: Arc::new(chunk),
+        }))
+    }
+
+    pub fn from_closure(closure: Arc<Closure>, callframes: &[CallFrame], stack: &[Value]) -> Value {
+        let mut locals = vec![Value::default(); closure.chunk.scope_size];
+
+        for outer in &closure.outers {
+            unsafe {
+                let base = if outer.level == 0 {
+                    0
+                } else {
+                    callframes.get_unchecked(outer.level - 1).get_ret()
+                };
+                let val = stack.get_unchecked(base + outer.position).clone();
+                ptr::write(locals.as_mut_ptr().add(outer.dest.into()), val);
+            }
+        }
+
+        Value::Func(Arc::new(ZapFn {
+            locals,
+            chunk: closure.chunk.clone(),
+        }))
+    }
+}
 
 pub struct ZapFnNative {
     pub name: String,

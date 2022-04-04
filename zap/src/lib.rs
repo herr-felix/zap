@@ -9,18 +9,17 @@ pub mod zap;
 
 pub use crate::zap::*;
 
-#[cfg(debug_assertions)]
+//#[cfg(debug_assertions)]
 pub mod tests {
     use crate::compiler::compile;
     use crate::env::SandboxEnv;
     use crate::reader::Reader;
-    use crate::vm::{self, Op};
-    use crate::zap::{Result, String, Value, ZapErr};
+    use crate::vm;
+    use crate::zap;
 
-    pub fn run_exp(src: &str, mut env: SandboxEnv) -> Result<String> {
+    pub fn run_exp(src: &str, mut env: SandboxEnv) -> zap::Result<zap::String> {
         let mut reader = Reader::new();
 
-        dbg!(src);
         reader.tokenize(src);
         reader.flush_token();
 
@@ -31,7 +30,7 @@ pub mod tests {
         loop {
             ast = reader.read_ast(&mut env)?;
             if ast.is_none() {
-                return Ok(String::from(res.to_string(&mut env)));
+                return Ok(zap::String::from(res.to_string(&mut env)));
             }
             chunk = compile(ast.unwrap())?;
             res = vm::run(chunk, &mut env)?;
@@ -45,12 +44,12 @@ pub mod tests {
 
     #[test]
     fn op_size() {
-        assert_eq!(std::mem::size_of::<Op>(), 8)
+        assert_eq!(std::mem::size_of::<vm::Op>(), 8)
     }
 
     #[test]
     fn value_size() {
-        assert_eq!(std::mem::size_of::<Value>(), 32)
+        assert_eq!(std::mem::size_of::<zap::Value>(), 32)
     }
 
     #[test]
@@ -91,7 +90,7 @@ pub mod tests {
         let env = SandboxEnv::default();
         assert_eq!(
             run_exp("gg", env),
-            Err(ZapErr::Msg("symbol 'gg' not in scope.".to_string()))
+            Err(zap::ZapErr::Msg("symbol 'gg' not in scope.".to_string()))
         );
     }
 
@@ -119,5 +118,17 @@ pub mod tests {
         test_exp("(= 1 2)", "false");
         test_exp("(= nil false)", "false");
         test_exp("(= false false)", "true");
+    }
+
+    #[test]
+    fn eval_let() {
+        test_exp("(let (x 12) x)", "12");
+        test_exp("(let (x 12 y (+ x 12)) (+ y 3))", "27");
+        test_exp("(let (f (fn (x) (+ x x x))) (f 12))", "36");
+    }
+
+    #[test]
+    fn eval_closure() {
+        test_exp("(let (n 2 f (fn (x) (+ x n))) (f 3))", "5");
     }
 }
