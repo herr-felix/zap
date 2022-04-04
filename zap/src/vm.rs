@@ -283,6 +283,11 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
 
     loop {
         let op = vm.get_next_op();
+
+
+        #[cfg(debug_assertions)]
+        let op_no = unsafe { vm.callframe.pc.offset_from(vm.callframe.start) };
+
         match op {
             Op::Push(const_idx) => vm.push_const(const_idx),
             Op::Call(argc) => vm.call(argc.into())?,
@@ -311,7 +316,7 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
         {
             println!(
                 "OP: {:0>5} {:<30} {}",
-                unsafe { vm.callframe.pc.offset_from(vm.callframe.start) },
+                op_no,
                 format!("{:?}", &op),
                 format!("STACK: {:?}", &vm.stack)
             );
