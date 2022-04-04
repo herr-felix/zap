@@ -131,7 +131,7 @@ impl VmState {
 
     #[inline]
     fn call(&mut self, argc: usize) -> Result<()> {
-        let ret = self.stack.len() - argc - 1;
+        let ret = self.stack.len() - (argc + 1);
         let head = std::mem::take(unsafe { self.stack.get_unchecked_mut(ret) });
         match head {
             Value::Func(func) => {
@@ -140,8 +140,7 @@ impl VmState {
                     func.chunk.get_callframe(ret),
                 ));
 
-                let locals = &func.locals[(argc - 1)..];
-                self.stack.extend_from_slice(locals);
+                self.stack.extend_from_slice(&func.locals[argc..]);
 
                 Ok(())
             }
@@ -167,14 +166,14 @@ impl VmState {
 
                 // Move the args
                 unsafe {
-                    let start = self.stack.as_mut_ptr().add(self.callframe.ret);
-                    ptr::swap_nonoverlapping(start, start.add(args_base), argc);
+                    let stack = self.stack.as_mut_ptr();
+                    let start = stack.add(self.callframe.ret);
+                    let args = stack.add(args_base);
+                    ptr::swap_nonoverlapping(start, args, argc);
                 }
 
                 self.stack.truncate(self.callframe.ret + argc);
-
-                let locals = &func.locals[(argc)..];
-                self.stack.extend_from_slice(locals);
+                self.stack.extend_from_slice(&func.locals[argc..]);
 
                 Ok(())
             }
@@ -192,11 +191,11 @@ impl VmState {
 
     #[inline]
     fn push(&mut self, val: Value) {
-        if self.stack.len() == self.stack.capacity() {
+        let len = self.stack.len();
+        if len == self.stack.capacity() {
             self.stack.reserve(1); // ALLOC
         }
         unsafe {
-            let len = self.stack.len();
             let top = self.stack.as_mut_ptr().add(len);
             ptr::write(top, val);
             self.stack.set_len(len + 1);
@@ -339,7 +338,6 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
 
     loop {
         let op = vm.get_next_op();
-
 
         #[cfg(debug_assertions)]
         let op_no = unsafe { vm.callframe.pc.offset_from(vm.callframe.start) };
