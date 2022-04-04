@@ -131,7 +131,7 @@ impl VmState {
 
     #[inline]
     fn call(&mut self, argc: usize) -> Result<()> {
-        let ret = self.stack.len() - argc;
+        let ret = self.stack.len() - argc - 1;
         let head = std::mem::take(unsafe { self.stack.get_unchecked_mut(ret) });
         match head {
             Value::Func(func) => {
@@ -160,7 +160,7 @@ impl VmState {
     #[inline]
     fn tailcall(&mut self, argc: usize) -> Result<()> {
         let args_base = self.stack.len() - argc;
-        let head = std::mem::take(unsafe { self.stack.get_unchecked_mut(args_base) });
+        let head = std::mem::take(unsafe { self.stack.get_unchecked_mut(args_base - 1) });
         match head {
             Value::Func(func) => {
                 self.callframe = func.chunk.get_callframe(self.callframe.ret);
@@ -168,18 +168,18 @@ impl VmState {
                 // Move the args
                 unsafe {
                     let start = self.stack.as_mut_ptr().add(self.callframe.ret);
-                    ptr::swap_nonoverlapping(start, start.add(args_base + 1), argc - 1);
+                    ptr::swap_nonoverlapping(start, start.add(args_base), argc);
                 }
 
-                self.stack.truncate(self.callframe.ret + argc - 1);
+                self.stack.truncate(self.callframe.ret + argc);
 
-                let locals = &func.locals[(argc - 1)..];
+                let locals = &func.locals[(argc)..];
                 self.stack.extend_from_slice(locals);
 
                 Ok(())
             }
             Value::FuncNative(f) => {
-                let args = unsafe { &self.stack.get_unchecked((args_base + 1)..self.stack.len()) };
+                let args = unsafe { &self.stack.get_unchecked((args_base)..self.stack.len()) };
 
                 let mut output = (f.func)(args)?;
                 self.stack.truncate(self.callframe.ret + 1);
@@ -192,7 +192,15 @@ impl VmState {
 
     #[inline]
     fn push(&mut self, val: Value) {
-        self.stack.push(val);
+        if self.stack.len() == self.stack.capacity() {
+            self.stack.reserve(1); // ALLOC
+        }
+        unsafe {
+            let len = self.stack.len();
+            let top = self.stack.as_mut_ptr().add(len);
+            ptr::write(top, val);
+            self.stack.set_len(len + 1);
+        }
     }
 
     #[inline]
@@ -230,7 +238,7 @@ impl VmState {
     #[inline]
     fn lookup<E: Env>(&mut self, id: Symbol, env: &mut E) -> Result<()> {
         let val = env.get_by_id(id)?;
-        self.stack.push(val);
+        self.push(val);
         Ok(())
     }
 

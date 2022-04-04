@@ -159,7 +159,7 @@ impl Compiler {
     }
 
     pub fn set_argc(&mut self, argc: u8) {
-        self.argc = argc;
+        self.argc = argc - 1;
     }
 
     fn push(&mut self, val: &Value) -> Result<()> {
