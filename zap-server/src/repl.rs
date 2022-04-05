@@ -42,12 +42,12 @@ pub async fn start_repl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             loop {
                 match reader.read_ast(&mut env) {
                     Ok(Some(form)) => {
-                        let env2 = &mut env;
+                        let env_ref = &mut env;
 
                         let evaluated = task::block_in_place(move || {
                             let chunk = compile(form)?;
                             let start = Instant::now();
-                            let res = vm::run(chunk, env2)?;
+                            let res = vm::run(chunk, env_ref)?;
                             let end = Instant::now();
                             println!("Evaluated in {:?}\n", end - start);
                             Ok(res)
@@ -62,7 +62,7 @@ pub async fn start_repl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                             }
                             Err(ZapErr::Msg(err)) => {
                                 output
-                                    .write(format!("Eval error: {}\n", err).as_bytes())
+                                    .write(format!("Runtime error: {}\n", err).as_bytes())
                                     .await?;
                             }
                         }

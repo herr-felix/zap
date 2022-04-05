@@ -109,6 +109,7 @@ enum Form {
     EqualConst(u16),
     Let(usize),
     Binding(Symbol),
+    Quoting,
 }
 
 struct Compiler {
@@ -116,6 +117,7 @@ struct Compiler {
     forms: Vec<Form>,
     scopes: Scoping,
     argc: u8,
+    quoting: bool,
 }
 
 impl Compiler {
@@ -125,6 +127,7 @@ impl Compiler {
             forms: vec![Form::Value(ast)],
             scopes: Scoping::default(),
             argc: 0,
+            quoting: false,
         }
     }
 
@@ -189,6 +192,13 @@ impl Compiler {
             return Err(error_msg(
                 "A function cannot have more than 254 parameters.",
             ));
+        }
+
+        // In quoting
+        if self.quoting {
+            self.forms.push(Form::List(list.clone(), 0));
+            self.forms.push(Form::Value(list[0].clone()));
+            return Ok(());
         }
 
         match list[0] {
@@ -308,6 +318,22 @@ impl Compiler {
                         self.forms.push(Form::AddMany(list, 1));
                     }
                 }
+            }
+            Value::Symbol(symbols::QUOTE) => {
+                if list.len() != 2 {
+                    return Err(error_msg("'quote' require only 1 value"));
+                }
+
+                self.push(&list[1])?;
+            }
+            Value::Symbol(symbols::QUASIQUOTE) => {
+                if list.len() != 2 {
+                    return Err(error_msg("'quasiquote' require only 1 value"));
+                }
+
+                self.quoting = true;
+                self.forms.push(Form::Quoting);
+                self.forms.push(Form::Value(list[1].clone()));
             }
             _ => {
                 self.forms.push(Form::Apply);
@@ -516,6 +542,9 @@ pub fn compile(ast: Value) -> Result<Arc<Chunk>> {
             }
             Form::Binding(symbol) => {
                 compiler.register_binding(symbol)?;
+            }
+            Form::Quoting => {
+                // TODO
             }
         }
     }

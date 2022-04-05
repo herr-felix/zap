@@ -131,4 +131,18 @@ pub mod tests {
     fn eval_closure() {
         test_exp("(let (n 2 f (fn (x) (+ x n))) (f 3))", "5");
     }
+
+    #[test]
+    fn eval_quote() {
+        test_exp("'(1 2 3)", "(1 2 3)");
+        test_exp("(quote (1 2 3))", "(1 2 3)");
+        test_exp("(quote (+ 2 2 2))", "(+ 2 2 2)");
+    }
+
+    #[test]
+    fn eval_quasiquote() {
+        test_exp("`(1 2 3)", "(1 2 3)");
+        test_exp("(quasiquote (1 2 3))", "(1 2 3)");
+        test_exp("(quasiquote (+ 2 2 2))", "(+ 2 2 2)");
+    }
 }

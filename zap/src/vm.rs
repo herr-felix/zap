@@ -69,10 +69,10 @@ impl Chunk {
     fn get_callframe(&self, ret: usize) -> CallFrame {
         CallFrame {
             pc: self.ops.as_ptr(),
-            #[cfg(debug_assertions)]
-            start: self.ops.as_ptr(),
             consts: self.consts.as_ptr(),
             ret,
+            #[cfg(debug_assertions)]
+            start: self.ops.as_ptr(),
         }
     }
 }
@@ -350,9 +350,6 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
             Op::Jmp(n) => vm.jump(n),
             Op::LookUp(id) => vm.lookup(id, env)?,
             Op::Define => vm.define(env)?,
-            Op::Pop => {
-                vm.pop_void();
-            }
             Op::Load(offset) => vm.load(offset),
             Op::Store(offset) => vm.store(offset),
             Op::AddConst(const_idx) => vm.add_const(const_idx)?,
@@ -360,6 +357,9 @@ pub fn run<E: Env>(chunk: Arc<Chunk>, env: &mut E) -> Result<Value> {
             Op::EqConst(const_idx) => vm.eq_const(const_idx),
             Op::Eq => vm.eq(),
             Op::Closure => vm.closure()?,
+            Op::Pop => {
+                vm.pop_void();
+            }
             Op::Return => {
                 if !vm.pop_call() {
                     return Ok(vm.pop());
