@@ -27,9 +27,10 @@ fn is_false(args: &[Value]) -> Result<Value> {
     Ok(Value::Bool(true))
 }
 
-pub fn load<E: Env>(env: &mut E) {
-    env.reg_fn("float?", is_float);
-    env.reg_fn("false?", is_false);
+pub fn load<E: Env>(env: &mut E) -> Result<()> {
+    env.reg_fn("float?", is_float)?;
+    env.reg_fn("false?", is_false)?;
+    Ok(())
 }
 
 #[cfg(test)]
