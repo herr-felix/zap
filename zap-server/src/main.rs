@@ -1,4 +1,5 @@
 mod repl;
+mod shared_env;
 
 //#[cfg(not(target_env = "msvc"))]
 //use tikv_jemallocator::Jemalloc;
@@ -8,6 +9,8 @@ mod repl;
 use crate::repl::start_repl;
 use std::fs::remove_file;
 use tokio::net::UnixListener;
+
+use crate::shared_env::SharedEnv;
 
 //#[cfg(not(target_env = "msvc"))]
 //#[global_allocator]
@@ -21,12 +24,15 @@ async fn main() -> std::io::Result<()> {
 
     println!("Server listening.");
 
+    let env = SharedEnv::default();
+
     // accept connections and process them serially
     loop {
         let (stream, _) = listener.accept().await.unwrap();
+        let env = env.clone();
         tokio::spawn(async move {
             let (mut input, mut output) = stream.into_split();
-            start_repl(&mut input, &mut output).await.ok();
+            start_repl(&mut input, &mut output, env).await.ok();
         });
     }
 }

@@ -4,21 +4,21 @@ use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::task;
 
 use zap::compiler::compile;
-use zap::env::SandboxEnv;
+use zap::env::Env;
 use zap::reader::Reader;
 use zap::vm;
 use zap::ZapErr;
 
-pub async fn start_repl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+pub async fn start_repl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin, E: Env>(
     input: &mut R,
     output: &mut W,
+    mut env: E,
 ) -> io::Result<()> {
     let mut buf = [0; 1024];
 
     let mut reader = Reader::new();
-    let mut env = SandboxEnv::default();
 
-    zap_core::load(&mut env);
+    zap_core::load(&mut env).unwrap(); // TODO: Handle thi
 
     loop {
         output.write("> ".as_bytes()).await?;

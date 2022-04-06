@@ -2,7 +2,7 @@ use crate::zap::{error_msg, Result, String, Symbol, Value, ZapFnNative};
 use fxhash::FxHashMap;
 
 pub type Scope = Vec<Option<Value>>;
-type SymbolTable = FxHashMap<String, Symbol>;
+pub type SymbolTable = FxHashMap<String, Symbol>;
 
 pub mod symbols {
     use crate::zap::Symbol;
@@ -38,11 +38,26 @@ pub mod symbols {
 
 pub trait Env {
     fn get_by_id(&self, id: Symbol) -> Result<Value>;
-    fn get(&self, key: &Value) -> Result<Value>;
     fn set(&mut self, key: &Value, val: &Value) -> Result<()>;
     fn reg_symbol(&mut self, s: String) -> Value;
     fn get_symbol(&self, key: Symbol) -> Result<String>;
-    fn reg_fn(&mut self, symbol: &str, f: fn(&[Value]) -> Result<Value>);
+
+    fn reg_fn(&mut self, symbol: &str, f: fn(&[Value]) -> Result<Value>) -> Result<()> {
+        let id = self.reg_symbol(String::from(symbol));
+        self.set(
+            &id,
+            &Value::FuncNative(ZapFnNative::new(String::from(symbol), f)),
+        )?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn get(&self, key: &Value) -> Result<Value> {
+        match key {
+            Value::Symbol(id) => self.get_by_id(*id),
+            _ => Err(error_msg("Only symbols can be used as keys in env.")),
+        }
+    }
 }
 
 pub struct SandboxEnv {
@@ -77,14 +92,6 @@ impl Env for SandboxEnv {
         }
     }
 
-    #[inline(always)]
-    fn get(&self, key: &Value) -> Result<Value> {
-        match key {
-            Value::Symbol(id) => self.get_by_id(*id),
-            _ => Err(error_msg("Only symbols can be used as keys in env.")),
-        }
-    }
-
     fn set(&mut self, key: &Value, val: &Value) -> Result<()> {
         if let Value::Symbol(s) = key {
             self.globals[*s as usize] = Some(val.clone());
@@ -96,11 +103,10 @@ impl Env for SandboxEnv {
 
     fn reg_symbol(&mut self, s: String) -> Value {
         let len = self.symbols.len();
-        let id = self
-            .symbols
-            .entry(s)
-            .or_insert_with(|| len.try_into().unwrap());
-        self.globals.push(None);
+        let id = self.symbols.entry(s).or_insert_with(|| {
+            self.globals.push(None);
+            len.try_into().unwrap()
+        });
         Value::Symbol(*id)
     }
 
@@ -110,12 +116,5 @@ impl Env for SandboxEnv {
             .find(|(_, v)| **v == id)
             .map(|(k, _)| k.clone())
             .ok_or_else(|| error_msg(format!("No known symbol for id={}", id).as_str()))
-    }
-
-    fn reg_fn(&mut self, symbol: &str, f: fn(&[Value]) -> Result<Value>) {
-        if let Value::Symbol(id) = self.reg_symbol(String::from(symbol)) {
-            self.globals[id as usize] =
-                Some(Value::FuncNative(ZapFnNative::new(String::from(symbol), f)));
-        }
     }
 }
